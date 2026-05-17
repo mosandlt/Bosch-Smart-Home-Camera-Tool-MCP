@@ -5,7 +5,7 @@
 > Reuses the proven reverse-engineered API client from the sister
 > [Python CLI tool](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python).
 >
-> **Status:** v0.2.0-alpha — read + write tools wired to live Bosch API (not yet released)
+> **Status:** v0.4.0-alpha — resources + prompts added (8 tools + 3 resources + 2 prompts, not yet released)
 
 [![License][license-shield]](LICENSE)
 [![Project Maintenance][maintenance-shield]][user_profile]
@@ -86,20 +86,22 @@ Tools intentionally NOT exposed to LLMs (write-risky / time-consuming):
 - Cloud clip download (large payloads)
 - Audio intercom (timing-sensitive)
 
-## Planned MCP resources
+## MCP resources
 
 | Resource URI | Description |
 |---|---|
-| `bosch://cameras` | JSON list of configured cameras |
-| `bosch://cameras/{name}/snapshot.jpg` | Latest cached snapshot |
-| `bosch://cameras/{name}/events` | Recent events JSON |
+| `bosch://cameras` | JSON list of all cameras (id, name, model, status, firmware, mac, description) |
+| `bosch://cameras/{name}/snapshot.jpg` | Latest cached JPEG, or fresh capture if cache empty |
+| `bosch://cameras/{name}/events` | Last 50 events (motion, person, audio) as JSON list |
 
-## Planned MCP prompts
+`bosch://cameras` is a static resource. The `{name}` variants are resource templates.
 
-| Prompt | Description |
-|---|---|
-| `daily-camera-summary` | Walk through today's events on all cameras and summarise |
-| `pre-leave-check` | Cycle through cameras: snapshot each, list anomalies |
+## MCP prompts
+
+| Prompt | Arguments | Description |
+|---|---|---|
+| `daily-camera-summary` | `hours: int = 24` | Multi-step report: events per camera, type breakdown, time distribution, anomaly highlights |
+| `pre-leave-check` | _(none)_ | Snapshot every camera, describe scene, flag anomalies, recommend indoor privacy mode |
 
 ## Auth model
 
@@ -172,9 +174,9 @@ Bosch-Smart-Home-Camera-Tool-MCP/
 
 - **v0.1.0** — concept doc + skeleton server, all tools defined but not yet implemented (returns `NotImplementedError`) ✅
 - **v0.2.0** — all 8 tools wired: read tools (list, status, events, snapshot) + write tools (privacy, light, pan, notifications) via sys.path injection (Option C) ✅
-- **v0.3.0** — refactor CLI into importable library (Option B), resources + prompts
-- **v0.4.0** — resources + prompts
+- **v0.4.0** — resources (`bosch://cameras`, `bosch://cameras/{name}/snapshot.jpg`, `bosch://cameras/{name}/events`) + prompts (`daily-camera-summary`, `pre-leave-check`) ✅
 - **v0.5.0** — streamable-HTTP transport, packaging for `pipx`/`uvx`
+- **v0.6.0** — refactor CLI into importable library (Option B)
 - **v1.0.0** — published to PyPI
 
 ## License

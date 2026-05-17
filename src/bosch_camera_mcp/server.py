@@ -1,7 +1,10 @@
-"""MCP server entrypoint — v0.2.0-alpha.
+"""MCP server entrypoint — v0.4.0-alpha.
 
 All 8 tool bodies are now wired to the sister CLI's bosch_camera.py via
 bosch_camera_mcp.adapters.cli_bridge (Option C: sys.path injection).
+Resources and prompts are registered by importing resources.py / prompts.py
+at the bottom of this module (the @mcp.resource / @mcp.prompt decorators
+self-register against the shared `mcp` FastMCP instance).
 """
 
 from __future__ import annotations
@@ -309,6 +312,14 @@ def bosch_camera_notifications_set(camera: str, enabled: bool) -> CameraStatus:
     br.set_notifications(session, cam_info["id"], enabled)
     return _build_status(name, cam_info, session, cfg)
 
+
+# ── Register resources + prompts ──────────────────────────────────────────────
+# Importing these modules causes their @mcp.resource / @mcp.prompt decorators
+# to execute, self-registering against the shared `mcp` FastMCP instance above.
+# Must be imported AFTER `mcp` is defined and AFTER all tool definitions so that
+# resources.py can import bosch_camera_snapshot from this module without a
+# circular import.
+from . import resources, prompts  # noqa: E402,F401  — side-effect imports
 
 # ── CLI entrypoint ────────────────────────────────────────────────────────────
 

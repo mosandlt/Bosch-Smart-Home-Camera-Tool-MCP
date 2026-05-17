@@ -104,14 +104,49 @@ if os.path.isdir(_cli_path) and _cli_path not in sys.path:
 
 Drawback: implicit, fragile, but acceptable for v0.1.0-alpha.
 
-**Status (v0.2.0-alpha):** Option C is the active implementation. The adapter
+**Status (v0.4.0-alpha):** Option C is the active implementation. The adapter
 `bosch_camera_mcp/adapters/cli_bridge.py` handles sys.path injection via
 `ensure_cli_importable()` and exposes `get_session_and_cameras()` +
 write helpers (`set_privacy_mode`, `set_light`, `set_pan`, `set_notifications`).
 All 8 tools are wired and tested. Write tools were implemented as new API-call
 functions in cli_bridge.py rather than calling the cmd_* functions directly —
 the cmd_* functions call print()/sys.exit() and are not suitable as library calls.
-Refactor to Option B (library extraction) is deferred to v0.3.0.
+Resources and prompts are implemented in `resources.py` and `prompts.py` and
+imported at the bottom of `server.py` to self-register via decorator side-effects.
+Refactor to Option B (library extraction) is deferred to v0.6.0.
+
+## Resources contract
+
+Three MCP resources are registered in `bosch_camera_mcp/resources.py`.
+
+| URI | Type | Returns | MIME |
+|---|---|---|---|
+| `bosch://cameras` | Static resource | JSON string — list of camera objects | `application/json` |
+| `bosch://cameras/{name}/snapshot.jpg` | Template resource | Raw JPEG bytes | `image/jpeg` |
+| `bosch://cameras/{name}/events` | Template resource | JSON string — list of event objects | `application/json` |
+
+**Registration pattern:** Resources self-register via `@mcp.resource(uri)` decorators in `resources.py`. That module is imported at the bottom of `server.py` (after the `mcp` FastMCP instance is created and all tools are defined), so the decorators execute against the correct instance without circular imports.
+
+**Static vs. template resources:** `bosch://cameras` has no URI parameters → registered as a `FunctionResource` (appears in `mcp.list_resources()`). The `{name}` variants have URI parameters → registered as `ResourceTemplate` entries (appear in `mcp.list_resource_templates()`).
+
+**Snapshot cache logic:** `bosch://cameras/{name}/snapshot.jpg` first checks `~/.cache/bosch-camera-mcp/snapshots/<safe_name>/` for the lexicographically latest `.jpg`. On cache hit the file is returned directly. On cache miss the `bosch_camera_snapshot` tool is called inline, which writes the new file and returns its path, which is then read back as bytes. This keeps caching logic in one place.
+
+**Auth errors:** All three resources wrap `get_session_and_cameras()` and re-raise `reauth_required` as `MCPError(code="auth_expired")` so MCP clients receive a consistent error code regardless of whether the call originated from a tool or a resource.
+
+## Prompts contract
+
+Two MCP prompts are registered in `bosch_camera_mcp/prompts.py`.
+
+| Name | Arguments | Purpose |
+|---|---|---|
+| `daily-camera-summary` | `hours: int = 24` | Multi-step report: iterate cameras, fetch events, summarise per type and time-slot, highlight anomalies |
+| `pre-leave-check` | _(none)_ | Pre-departure routine: snapshot + scene description + anomaly flags + indoor privacy recommendation |
+
+**Design principle:** Prompts are pure instruction templates — they return `list[UserMessage]` containing natural-language instructions that tell Claude which tools to call and in which order. They make no API calls themselves. This keeps prompts stateless, trivially testable, and reusable across transport modes.
+
+**Message type:** Both prompts return `[UserMessage(...)]` from `mcp.server.fastmcp.prompts.base`. The `UserMessage` class accepts a plain `str` which is automatically wrapped in `TextContent(type="text", text=...)`.
+
+**Tool references:** Tests in `test_prompts.py::TestPromptToolReferences` assert that every tool name mentioned in prompt text (`bosch_camera_list`, `bosch_camera_events`, `bosch_camera_snapshot`, `bosch_camera_privacy_set`) is actually registered on the `mcp` FastMCP instance, preventing prompt/tool name drift.
 
 ## Tool error model
 
