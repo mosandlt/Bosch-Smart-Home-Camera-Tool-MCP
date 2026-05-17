@@ -46,9 +46,9 @@ _CFG = {
             "firmware": "3.0.0",
             "mac": "aa:bb:cc:dd:ee:01",
             "download_folder": "Garten",
-            "local_ip": "",
-            "local_username": "",
-            "local_password": "",
+            "local_ip": "192.168.20.27",
+            "local_username": "admin",
+            "local_password": "secret123",
             "has_light": True,
             "pan_limit": 0,
         },
@@ -137,8 +137,8 @@ def _make_fake_bosch_camera_module(cfg: dict = _CFG):
     m.api_get_events.side_effect = lambda session, cam_id, limit=10: (
         _EVENTS_CAM1[:limit] if cam_id == CAM_ID_1 else []
     )
-    m.snap_from_proxy.return_value = b"\xff\xd8\xff" + b"\x00" * 100  # fake JPEG
-    m.snap_from_local.return_value = None
+    m.snap_from_proxy.return_value = b"\xff\xd8\xff" + b"\x00" * 100  # fake JPEG (kept for legacy)
+    m.snap_from_local.return_value = b"\xff\xd8\xff" + b"\x00" * 80  # fake JPEG via LAN
     m.snap_from_events.return_value = (
         b"\xff\xd8\xff" + b"\x00" * 50,
         "2026-05-17T08:00:00",
@@ -262,16 +262,14 @@ class TestStatus:
 
 
 class TestSnapshot:
-    def test_snapshot_writes_to_cache_dir(self, patch_bosch_camera):
-        """Snapshot bytes are written to ~/.cache/bosch-camera-mcp/snapshots/."""
+    def test_snapshot_uses_local_only(self, patch_bosch_camera):
+        """Snapshot goes directly to LAN (snap_from_local); method must be local_lan."""
         from bosch_camera_mcp.server import bosch_camera_snapshot
 
         result = bosch_camera_snapshot(camera="Garten")
-        assert result.method == "cloud_proxy"
+        assert result.method == "local_lan"
         assert result.path.endswith(".jpg")
-        # File should have been written to disk
         assert Path(result.path).exists()
-        # Path must be inside ~/.cache/bosch-camera-mcp/snapshots/
         assert "bosch-camera-mcp" in result.path
         assert "Garten" in result.path
 
@@ -281,39 +279,20 @@ class TestSnapshot:
         result = bosch_camera_snapshot(camera="Garten")
         assert isinstance(result, SnapshotResult)
 
-    def test_snapshot_falls_back_to_events_when_live_unavailable(
-        self, patch_bosch_camera
-    ):
-        """When proxy and local both fail, falls back to event snapshot."""
-        import bosch_camera as bc  # patched fake
-
-        bc.snap_from_proxy.return_value = None
-        bc.snap_from_local.return_value = None
+    def test_snapshot_does_NOT_call_cloud_proxy(self, patch_bosch_camera):
+        """snap_from_proxy must never be called — LAN-only policy enforced."""
+        import bosch_camera as bc
 
         from bosch_camera_mcp.server import bosch_camera_snapshot
 
-        result = bosch_camera_snapshot(camera="Garten")
-        assert result.method == "last_event"
+        bosch_camera_snapshot(camera="Garten")
+        bc.snap_from_proxy.assert_not_called()
 
-    def test_snapshot_prefer_local_tries_local_first(self, patch_bosch_camera):
-        """prefer_local=True → local snapshot attempted before cloud proxy."""
+    def test_snapshot_no_cloud_fallback_raises_mcp_error(self, patch_bosch_camera):
+        """When LAN fails, raises MCPError(local_unavailable) — no cloud fallback."""
         import bosch_camera as bc
 
-        bc.snap_from_local.return_value = b"\xff\xd8\xff" + b"\x00" * 80
-
-        from bosch_camera_mcp.server import bosch_camera_snapshot
-
-        result = bosch_camera_snapshot(camera="Garten", prefer_local=True)
-        assert result.method == "local_lan"
-        bc.snap_from_local.assert_called_once()
-
-    def test_snapshot_raises_when_all_methods_fail(self, patch_bosch_camera):
-        """All methods returning None → MCPError(local_unavailable)."""
-        import bosch_camera as bc
-
-        bc.snap_from_proxy.return_value = None
         bc.snap_from_local.return_value = None
-        bc.snap_from_events.return_value = (None, "")
 
         from bosch_camera_mcp.errors import MCPError
         from bosch_camera_mcp.server import bosch_camera_snapshot
@@ -321,6 +300,81 @@ class TestSnapshot:
         with pytest.raises(MCPError) as exc_info:
             bosch_camera_snapshot(camera="Garten")
         assert exc_info.value.code == "local_unavailable"
+        # cloud proxy and event fallback must NOT have been attempted
+        bc.snap_from_proxy.assert_not_called()
+        bc.snap_from_events.assert_not_called()
+
+    def test_snapshot_raises_when_local_unavailable(self, patch_bosch_camera):
+        """snap_from_local returning None raises MCPError(local_unavailable)."""
+        import bosch_camera as bc
+
+        bc.snap_from_local.return_value = None
+
+        from bosch_camera_mcp.errors import MCPError
+        from bosch_camera_mcp.server import bosch_camera_snapshot
+
+        with pytest.raises(MCPError) as exc_info:
+            bosch_camera_snapshot(camera="Garten")
+        assert exc_info.value.code == "local_unavailable"
+        assert "LAN snapshot failed" in exc_info.value.detail
+
+
+# ---------------------------------------------------------------------------
+# bosch_camera_stream_url
+# ---------------------------------------------------------------------------
+
+
+class TestStreamUrl:
+    def test_stream_url_returns_rtsps_lan_url(self, patch_bosch_camera):
+        """Returns a StreamUrlResult with a valid rtsps:// URL for the LAN camera."""
+        from bosch_camera_mcp.server import StreamUrlResult, bosch_camera_stream_url
+
+        result = bosch_camera_stream_url(camera="Garten")
+        assert isinstance(result, StreamUrlResult)
+        assert result.camera == "Garten"
+        assert result.rtsps_url.startswith("rtsps://")
+
+    def test_stream_url_format_uses_https_port_443(self, patch_bosch_camera):
+        """URL must embed port 443 (Bosch camera TLS endpoint)."""
+        from bosch_camera_mcp.server import bosch_camera_stream_url
+
+        result = bosch_camera_stream_url(camera="Garten")
+        assert ":443" in result.rtsps_url
+        assert "rtsp_tunnel" in result.rtsps_url
+
+    def test_stream_url_contains_local_ip(self, patch_bosch_camera):
+        """The camera's local_ip must appear in the URL."""
+        from bosch_camera_mcp.server import bosch_camera_stream_url
+
+        result = bosch_camera_stream_url(camera="Garten")
+        # Garten has local_ip 192.168.20.27 in test config
+        assert "192.168.20.27" in result.rtsps_url
+
+    def test_stream_url_missing_local_creds_raises_local_unavailable(self, patch_bosch_camera):
+        """Camera without local_ip/credentials raises MCPError(local_unavailable)."""
+        from bosch_camera_mcp.errors import MCPError
+        from bosch_camera_mcp.server import bosch_camera_stream_url
+
+        with pytest.raises(MCPError) as exc_info:
+            bosch_camera_stream_url(camera="Innen")
+        assert exc_info.value.code == "local_unavailable"
+        assert "local_ip" in exc_info.value.detail or "No local credentials" in exc_info.value.detail
+
+    def test_stream_url_unknown_camera_raises_unknown_camera(self, patch_bosch_camera):
+        """Unknown camera name raises MCPError(unknown_camera)."""
+        from bosch_camera_mcp.errors import MCPError
+        from bosch_camera_mcp.server import bosch_camera_stream_url
+
+        with pytest.raises(MCPError) as exc_info:
+            bosch_camera_stream_url(camera="Dachboden")
+        assert exc_info.value.code == "unknown_camera"
+
+    def test_stream_url_note_is_lan_only(self, patch_bosch_camera):
+        """Result note must communicate LAN-only requirement."""
+        from bosch_camera_mcp.server import bosch_camera_stream_url
+
+        result = bosch_camera_stream_url(camera="Garten")
+        assert "LAN" in result.note
 
 
 # ---------------------------------------------------------------------------

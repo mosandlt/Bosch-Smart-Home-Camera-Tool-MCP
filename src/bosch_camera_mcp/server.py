@@ -65,8 +65,16 @@ class SnapshotResult(BaseModel):
     """Path-based snapshot result."""
 
     path: str = Field(description="Filesystem path to the saved JPEG")
-    method: str = Field(description="Source: cloud_proxy | local_lan | last_event")
+    method: str = Field(description="Source: local_lan (LAN-only; cloud fallback removed in v1.1.0)")
     timestamp: str = Field(description="ISO 8601 capture time")
+
+
+class StreamUrlResult(BaseModel):
+    """LAN RTSPS stream URL result."""
+
+    camera: str = Field(description="Canonical camera name from config")
+    rtsps_url: str = Field(description="LAN RTSPS URL via TLS proxy (rtsps://<user>:<pass>@<ip>:443/...)")
+    note: str = "LAN-only — MCP host must be on the same network as the camera."
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -168,11 +176,11 @@ def bosch_camera_status(camera: str) -> CameraStatus:
 
 
 @mcp.tool()
-def bosch_camera_snapshot(camera: str, prefer_local: bool = False) -> SnapshotResult:
-    """Capture a fresh snapshot. Tries cloud proxy first unless prefer_local=True.
+def bosch_camera_snapshot(camera: str) -> SnapshotResult:
+    """Capture a fresh snapshot via LAN only (HTTP Digest to camera IP). No Bosch cloud roundtrip.
 
-    Saves the JPEG to ~/.cache/bosch-camera-mcp/snapshots/<camera>/<iso-ts>.jpg
-    and returns the filesystem path.
+    Requires the MCP host to be on the same network as the camera. Saves to
+    ~/.cache/bosch-camera-mcp/snapshots/<camera>/<iso-ts>.jpg.
     """
     br = _bridge()
     cfg, session, cameras = _get_session()
@@ -181,7 +189,6 @@ def bosch_camera_snapshot(camera: str, prefer_local: bool = False) -> SnapshotRe
     import bosch_camera as bc  # type: ignore[import-not-found]
 
     name, cam_info = br._resolve_cam(cameras, camera)
-    token = cfg["account"].get("bearer_token", "")
 
     # Build cache directory
     safe_name = name.replace(" ", "_")
@@ -195,38 +202,16 @@ def bosch_camera_snapshot(camera: str, prefer_local: bool = False) -> SnapshotRe
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     ts_now = datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
-    data: Optional[bytes] = None
-    method = "cloud_proxy"
 
-    if prefer_local:
-        # Try local first, then cloud proxy
-        data = bc.snap_from_local(cam_info)
-        if data:
-            method = "local_lan"
-        else:
-            data = bc.snap_from_proxy(cam_info, token, cfg=cfg)
-            method = "cloud_proxy"
-    else:
-        # Cloud proxy first, then local
-        data = bc.snap_from_proxy(cam_info, token, cfg=cfg)
-        method = "cloud_proxy"
-        if data is None:
-            data = bc.snap_from_local(cam_info)
-            if data:
-                method = "local_lan"
-
-    # Fallback: latest event snapshot
-    if data is None:
-        event_data, event_ts = bc.snap_from_events(session, cam_info)
-        if event_data:
-            data = event_data
-            method = "last_event"
-            ts_now = event_ts.replace(":", "-").replace("T", "_") if event_ts else ts_now
+    data: Optional[bytes] = bc.snap_from_local(cam_info)
 
     if data is None:
         raise MCPError(
             code="local_unavailable",
-            detail=f"All snapshot methods failed for camera {name!r}.",
+            detail=(
+                f"LAN snapshot failed for {name!r}. Possible causes: camera offline, "
+                "Mac not on same network, local credentials missing."
+            ),
             camera=name,
         )
 
@@ -235,9 +220,48 @@ def bosch_camera_snapshot(camera: str, prefer_local: bool = False) -> SnapshotRe
 
     return SnapshotResult(
         path=str(out_path),
-        method=method,
+        method="local_lan",
         timestamp=ts_now.replace("_", "T").replace("-", ":"),
     )
+
+
+@mcp.tool()
+def bosch_camera_stream_url(camera: str) -> StreamUrlResult:
+    """Get the LAN RTSPS stream URL for one camera. No Bosch cloud relay.
+
+    The returned URL is consumable by ffmpeg/VLC/go2rtc. Requires that the MCP
+    host runs on the same network as the camera and has local credentials
+    configured for the camera (bosch_config.json → cameras[name].local_*).
+    """
+    from urllib.parse import quote as _q
+
+    br = _bridge()
+    cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+
+    local_ip = cam_info.get("local_ip", "").strip()
+    local_user = cam_info.get("local_username", "").strip()
+    local_pass = cam_info.get("local_password", "").strip()
+
+    if not local_ip or not local_user or not local_pass:
+        raise MCPError(
+            code="local_unavailable",
+            detail=(
+                f"No local credentials for camera {name!r}. "
+                "Add local_ip + local_username + local_password in bosch_config.json."
+            ),
+            camera=name,
+        )
+
+    auth_prefix = f"{_q(local_user, safe='')}:{_q(local_pass, safe='')}@"
+    rtsps_url = (
+        f"rtsps://{auth_prefix}{local_ip}:443"
+        "/rtsp_tunnel?inst=2&enableaudio=1&fmtp=1&maxSessionDuration=3600"
+    )
+
+    return StreamUrlResult(camera=name, rtsps_url=rtsps_url)
 
 
 @mcp.tool()

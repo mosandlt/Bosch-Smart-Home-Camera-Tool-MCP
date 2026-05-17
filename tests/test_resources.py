@@ -90,8 +90,8 @@ def _make_fake_bc(cfg=_CFG):
     m.api_get_events.side_effect = lambda session, cam_id, limit=50: (
         _EVENTS_CAM1[:limit] if cam_id == CAM_ID_1 else []
     )
-    m.snap_from_proxy.return_value = b"\xff\xd8\xff" + b"\x00" * 100
-    m.snap_from_local.return_value = None
+    m.snap_from_proxy.return_value = b"\xff\xd8\xff" + b"\x00" * 100  # kept for legacy
+    m.snap_from_local.return_value = b"\xff\xd8\xff" + b"\x00" * 80  # LAN snapshot (v1.1.0 primary path)
     m.snap_from_events.return_value = (b"\xff\xd8\xff" + b"\x00" * 50, "2026-05-17T08:00:00")
     return m
 
@@ -225,7 +225,7 @@ class TestCameraSnapshotResource:
         with patch("pathlib.Path.home", return_value=tmp_path):
             data = camera_snapshot("Garten")
 
-        # snap_from_proxy returns fake JPEG bytes
+        # snap_from_local returns fake JPEG bytes (v1.1.0: LAN-only path)
         assert data[:3] == b"\xff\xd8\xff"
 
     def test_snapshot_resource_template_registered(self):

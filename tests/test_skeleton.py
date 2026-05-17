@@ -21,14 +21,15 @@ from bosch_camera_mcp.server import (
     bosch_camera_privacy_set,
     bosch_camera_snapshot,
     bosch_camera_status,
+    bosch_camera_stream_url,
     mcp,
 )
 
 
 class TestVersion:
     def test_version_is_v1_0_0(self) -> None:
-        """v1.0.0 — first stable release."""
-        assert __version__ == "1.0.0"
+        """v1.1.0 — LAN-only media path release."""
+        assert __version__ == "1.1.0"
 
 
 class TestServerApp:
@@ -79,3 +80,7 @@ class TestToolSurface:
     def test_tool_notifications_set_is_wired(self) -> None:
         assert callable(bosch_camera_notifications_set)
         assert self._is_wired(bosch_camera_notifications_set)
+
+    def test_tool_stream_url_is_wired(self) -> None:
+        assert callable(bosch_camera_stream_url)
+        assert self._is_wired(bosch_camera_stream_url)

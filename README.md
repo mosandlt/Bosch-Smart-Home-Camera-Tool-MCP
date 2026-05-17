@@ -5,7 +5,7 @@
 > Reuses the proven reverse-engineered API client from the sister
 > [Python CLI tool](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python).
 >
-> **Status:** v1.0.0 — first stable release (8 tools + 3 resources + 2 prompts, stdio/SSE/streamable-HTTP, pipx/uvx-installable)
+> **Status:** v1.1.0 — LAN-only media (privacy hardened): snapshot + stream URL go directly to camera, no Bosch cloud relay for media (9 tools + 3 resources + 2 prompts, stdio/SSE/streamable-HTTP, pipx/uvx-installable)
 
 [![License][license-shield]](LICENSE)
 [![Project Maintenance][maintenance-shield]][user_profile]
@@ -71,7 +71,8 @@ The MCP server is a thin wrapper around the Python CLI's API layer. It does **no
 |---|---|---|
 | `bosch_camera_list` | List all configured cameras | array of `{id, name, model, hw_version, status}` |
 | `bosch_camera_status` | Get online/offline + privacy state for one camera | `{name, status, privacy_mode, light_on, last_event_at}` |
-| `bosch_camera_snapshot` | Capture a fresh snapshot (cloud or local) | `{path, method, timestamp}` + optional inline image content |
+| `bosch_camera_snapshot` | LAN-only JPEG capture (no cloud) — HTTP Digest to camera IP | `{path, method, timestamp}` |
+| `bosch_camera_stream_url` | LAN-only RTSPS stream URL (no cloud relay) — consumable by ffmpeg/VLC/go2rtc | `{camera, rtsps_url, note}` |
 | `bosch_camera_events` | List recent motion/person/audio events | array of `{event_id, type, timestamp, has_clip}` |
 | `bosch_camera_privacy_set` | Turn privacy mode on/off | `{camera, privacy_mode}` |
 | `bosch_camera_light_set` | Turn camera spotlight on/off (Gen1+Gen2) | `{camera, light_on}` |
@@ -102,6 +103,19 @@ Tools intentionally NOT exposed to LLMs (write-risky / time-consuming):
 |---|---|---|
 | `daily-camera-summary` | `hours: int = 24` | Multi-step report: events per camera, type breakdown, time distribution, anomaly highlights |
 | `pre-leave-check` | _(none)_ | Snapshot every camera, describe scene, flag anomalies, recommend indoor privacy mode |
+
+## Privacy stance — media operations are LAN-only
+
+Snapshots and stream URLs go directly from the MCP host to the camera over the LAN — no Bosch cloud relay. The remaining tools (status, events, privacy/light/pan/notifications) still use the cloud because Bosch does not expose a local API for those yet (planned summer 2026).
+
+| Tool | Path |
+|---|---|
+| `bosch_camera_snapshot` | LAN only — HTTP Digest to camera IP |
+| `bosch_camera_stream_url` | LAN only — RTSPS via local Bosch TLS proxy |
+| `bosch_camera_list` / `status` / `events` | Bosch cloud (no local API yet) |
+| `bosch_camera_privacy_set` / `light_set` / `pan` / `notifications_set` | Bosch cloud (no local API yet) |
+
+The MCP host must be on the same network as the cameras for media tools to work. If it isn't, the snapshot/stream tools surface `local_unavailable` rather than falling back to cloud — by design.
 
 ## Auth model
 
@@ -211,7 +225,8 @@ Bosch-Smart-Home-Camera-Tool-MCP/
 - **v0.4.0** — resources (`bosch://cameras`, `bosch://cameras/{name}/snapshot.jpg`, `bosch://cameras/{name}/events`) + prompts (`daily-camera-summary`, `pre-leave-check`) ✅
 - **v0.5.0** — streamable-HTTP transport (`--transport http|sse|stdio`), packaging for `pipx`/`uvx`, 24 new tests ✅
 - **v1.0.0** — first stable release: 106 tests, published wheel + sdist on GitHub Releases, PyPI publish pending ✅
-- **v1.1.0 (next)** — refactor sister CLI into importable `bosch_camera_lib` package (Option B), removing the sys.path injection
+- **v1.1.0** — LAN-only media path (privacy hardened): `bosch_camera_snapshot` and new `bosch_camera_stream_url` go directly to camera over LAN, no Bosch cloud relay for media. 113 tests. ✅
+- **v1.2.0 (next)** — refactor sister CLI into importable `bosch_camera_lib` package (Option B), removing the sys.path injection
 
 ## License
 

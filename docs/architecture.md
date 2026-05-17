@@ -115,6 +115,59 @@ Resources and prompts are implemented in `resources.py` and `prompts.py` and
 imported at the bottom of `server.py` to self-register via decorator side-effects.
 Refactor to Option B (library extraction) is deferred to v0.6.0.
 
+## Design constraints: LAN-only media path (v1.1.0)
+
+### Rationale
+
+Snapshots and stream URLs carry sensitive visual data. Routing them through the Bosch cloud introduces a third-party data processor in an LLM-assisted flow where the user has not explicitly consented to cloud relay of live camera images. From v1.1.0, media operations bypass the cloud entirely.
+
+### Which tools are LAN-only vs. cloud
+
+| Tool | Path | Reason |
+|---|---|---|
+| `bosch_camera_snapshot` | LAN — HTTP Digest to `local_ip:443/snap.jpg` | Visual data — no cloud relay |
+| `bosch_camera_stream_url` | LAN — RTSPS to `local_ip:443` | Visual/audio data — no cloud relay |
+| `bosch_camera_list` / `status` / `events` | Bosch cloud | No local API available |
+| `bosch_camera_privacy_set` / `light_set` / `pan` / `notifications_set` | Bosch cloud | No local API available |
+
+### Data flow diagram
+
+```
+LAN media path (v1.1.0):
+
+  MCP client ──→ bosch_camera_snapshot ──→ camera local_ip:443/snap.jpg (HTTP Digest)
+  MCP client ──→ bosch_camera_stream_url → rtsps://user:pass@local_ip:443/rtsp_tunnel
+
+Cloud path (unchanged for non-media tools):
+
+  MCP client ──→ bosch_camera_status ──→ residential.cbs.boschsecurity.com
+  MCP client ──→ bosch_camera_events ──→ residential.cbs.boschsecurity.com
+```
+
+### Prerequisites for LAN media tools
+
+Each camera in `bosch_config.json` must have:
+- `local_ip`: LAN IP of the camera (e.g. `192.168.20.27`)
+- `local_username`: Digest auth username (obtained via mitmproxy or Bosch app)
+- `local_password`: Digest auth password
+
+If any of these are missing, the tool raises `MCPError(code="local_unavailable")` with a descriptive message. There is no cloud fallback — this is intentional.
+
+### Error codes
+
+| Code | Meaning | User action |
+|---|---|---|
+| `local_unavailable` | LAN snapshot/stream failed — camera unreachable or missing creds | Check network, add `local_ip`/credentials to config |
+| `unknown_camera` | Camera name not found in config | Check camera name spelling |
+| `reauth_required` | Bearer token expired | Run `python3 bosch_camera.py token browser` |
+
+### Trade-offs
+
+- **Pro:** No Bosch cloud sees LLM-triggered live images.
+- **Pro:** Faster — direct LAN HTTP is ~50–200 ms vs. cloud proxy ~500–2000 ms.
+- **Con:** MCP host must be on the LAN (not a remote cloud-hosted Claude instance).
+- **Con:** Requires per-camera local credentials (one-time mitmproxy capture).
+
 ## Resources contract
 
 Three MCP resources are registered in `bosch_camera_mcp/resources.py`.
