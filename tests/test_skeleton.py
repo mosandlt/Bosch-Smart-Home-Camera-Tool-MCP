@@ -27,7 +27,7 @@ from bosch_camera_mcp.server import (
 
 
 class TestVersion:
-    def test_version_is_v1_0_0(self) -> None:
+    def test_version_is_v1_1_0(self) -> None:
         """v1.1.0 — LAN-only media path release."""
         assert __version__ == "1.1.0"
 
