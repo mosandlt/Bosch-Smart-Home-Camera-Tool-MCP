@@ -42,32 +42,32 @@ class TestToolSurface:
 
     def test_list_not_yet_implemented(self) -> None:
         with pytest.raises(NotImplementedError, match="v0.2.0"):
-            bosch_camera_list.fn()
+            bosch_camera_list()
 
     def test_status_not_yet_implemented(self) -> None:
         with pytest.raises(NotImplementedError, match="v0.2.0"):
-            bosch_camera_status.fn(camera="garten")
+            bosch_camera_status(camera="garten")
 
     def test_snapshot_not_yet_implemented(self) -> None:
         with pytest.raises(NotImplementedError, match="v0.2.0"):
-            bosch_camera_snapshot.fn(camera="garten")
+            bosch_camera_snapshot(camera="garten")
 
     def test_events_not_yet_implemented(self) -> None:
         with pytest.raises(NotImplementedError, match="v0.2.0"):
-            bosch_camera_events.fn(camera="garten")
+            bosch_camera_events(camera="garten")
 
     def test_privacy_set_not_yet_implemented(self) -> None:
         with pytest.raises(NotImplementedError, match="v0.3.0"):
-            bosch_camera_privacy_set.fn(camera="garten", enabled=True)
+            bosch_camera_privacy_set(camera="garten", enabled=True)
 
     def test_light_set_not_yet_implemented(self) -> None:
         with pytest.raises(NotImplementedError, match="v0.3.0"):
-            bosch_camera_light_set.fn(camera="garten", enabled=True)
+            bosch_camera_light_set(camera="garten", enabled=True)
 
     def test_pan_not_yet_implemented(self) -> None:
         with pytest.raises(NotImplementedError, match="v0.3.0"):
-            bosch_camera_pan.fn(camera="garten", direction="left")
+            bosch_camera_pan(camera="garten", direction="left")
 
     def test_notifications_set_not_yet_implemented(self) -> None:
         with pytest.raises(NotImplementedError, match="v0.3.0"):
-            bosch_camera_notifications_set.fn(camera="garten", enabled=True)
+            bosch_camera_notifications_set(camera="garten", enabled=True)
