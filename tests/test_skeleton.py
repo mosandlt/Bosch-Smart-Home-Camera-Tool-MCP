@@ -26,9 +26,9 @@ from bosch_camera_mcp.server import (
 
 
 class TestVersion:
-    def test_version_is_v0_5_alpha(self) -> None:
-        """Version bumped to 0.5.0a0 when streamable-HTTP transport + packaging added."""
-        assert __version__ == "0.5.0a0"
+    def test_version_is_v1_0_0(self) -> None:
+        """v1.0.0 — first stable release."""
+        assert __version__ == "1.0.0"
 
 
 class TestServerApp:

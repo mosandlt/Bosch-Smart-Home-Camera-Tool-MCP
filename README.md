@@ -5,7 +5,7 @@
 > Reuses the proven reverse-engineered API client from the sister
 > [Python CLI tool](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python).
 >
-> **Status:** v0.5.0-alpha — streamable-HTTP transport + pipx/uvx packaging (8 tools + 3 resources + 2 prompts, not yet released)
+> **Status:** v1.0.0 — first stable release (8 tools + 3 resources + 2 prompts, stdio/SSE/streamable-HTTP, pipx/uvx-installable)
 
 [![License][license-shield]](LICENSE)
 [![Project Maintenance][maintenance-shield]][user_profile]
@@ -210,8 +210,8 @@ Bosch-Smart-Home-Camera-Tool-MCP/
 - **v0.2.0** — all 8 tools wired: read tools (list, status, events, snapshot) + write tools (privacy, light, pan, notifications) via sys.path injection (Option C) ✅
 - **v0.4.0** — resources (`bosch://cameras`, `bosch://cameras/{name}/snapshot.jpg`, `bosch://cameras/{name}/events`) + prompts (`daily-camera-summary`, `pre-leave-check`) ✅
 - **v0.5.0** — streamable-HTTP transport (`--transport http|sse|stdio`), packaging for `pipx`/`uvx`, 24 new tests ✅
-- **v0.6.0** — refactor CLI into importable library (Option B)
-- **v1.0.0** — published to PyPI
+- **v1.0.0** — first stable release: 106 tests, published wheel + sdist on GitHub Releases, PyPI publish pending ✅
+- **v1.1.0 (next)** — refactor sister CLI into importable `bosch_camera_lib` package (Option B), removing the sys.path injection
 
 ## License
 
