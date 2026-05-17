@@ -1,0 +1,5 @@
+pytest>=8.0
+pytest-asyncio>=0.23
+pytest-mock>=3.12
+responses>=0.25
+freezegun>=1.4

@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bosch-smart-home-camera-mcp"
+version = "0.1.0a0"
+description = "Model Context Protocol server for Bosch Smart Home cameras"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [{ name = "mosandlt" }]
+keywords = ["mcp", "bosch", "smart-home", "camera", "claude"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Home Automation",
+]
+dependencies = [
+    "mcp>=1.2.0",
+    "pydantic>=2.6",
+    "requests>=2.31",
+    "urllib3>=2.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-mock>=3.12",
+    "responses>=0.25",
+    "freezegun>=1.4",
+]
+
+[project.scripts]
+bosch-smart-home-camera-mcp = "bosch_camera_mcp.server:main"
+
+[project.urls]
+Homepage = "https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP"
+"Bug Tracker" = "https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP/issues"
+"Sister CLI" = "https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
