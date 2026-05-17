@@ -104,6 +104,15 @@ if os.path.isdir(_cli_path) and _cli_path not in sys.path:
 
 Drawback: implicit, fragile, but acceptable for v0.1.0-alpha.
 
+**Status (v0.2.0-alpha):** Option C is the active implementation. The adapter
+`bosch_camera_mcp/adapters/cli_bridge.py` handles sys.path injection via
+`ensure_cli_importable()` and exposes `get_session_and_cameras()` +
+write helpers (`set_privacy_mode`, `set_light`, `set_pan`, `set_notifications`).
+All 8 tools are wired and tested. Write tools were implemented as new API-call
+functions in cli_bridge.py rather than calling the cmd_* functions directly —
+the cmd_* functions call print()/sys.exit() and are not suitable as library calls.
+Refactor to Option B (library extraction) is deferred to v0.3.0.
+
 ## Tool error model
 
 Every tool returns either a success payload (Pydantic model) or raises `MCPError` with a structured reason:

@@ -5,7 +5,7 @@
 > Reuses the proven reverse-engineered API client from the sister
 > [Python CLI tool](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python).
 >
-> **Status:** concept / draft (v0.1.0-alpha — not yet released)
+> **Status:** v0.2.0-alpha — read + write tools wired to live Bosch API (not yet released)
 
 [![License][license-shield]](LICENSE)
 [![Project Maintenance][maintenance-shield]][user_profile]
@@ -170,9 +170,9 @@ Bosch-Smart-Home-Camera-Tool-MCP/
 
 ## Roadmap
 
-- **v0.1.0** — concept doc + skeleton server, all tools defined but not yet implemented (returns `NotImplementedError`)
-- **v0.2.0** — read-only tools wired to live Bosch API (list, status, events, snapshot)
-- **v0.3.0** — write tools (privacy, light, pan, notifications)
+- **v0.1.0** — concept doc + skeleton server, all tools defined but not yet implemented (returns `NotImplementedError`) ✅
+- **v0.2.0** — all 8 tools wired: read tools (list, status, events, snapshot) + write tools (privacy, light, pan, notifications) via sys.path injection (Option C) ✅
+- **v0.3.0** — refactor CLI into importable library (Option B), resources + prompts
 - **v0.4.0** — resources + prompts
 - **v0.5.0** — streamable-HTTP transport, packaging for `pipx`/`uvx`
 - **v1.0.0** — published to PyPI
