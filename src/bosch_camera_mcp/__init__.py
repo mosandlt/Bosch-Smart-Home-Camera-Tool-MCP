@@ -7,4 +7,4 @@ clients.
 Status: v0.4.0-alpha — resources + prompts added on top of 8 wired tools.
 """
 
-__version__ = "0.4.0a0"
+__version__ = "0.5.0a0"

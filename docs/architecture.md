@@ -190,6 +190,77 @@ MCP tools run sequentially within one server instance (single asyncio event loop
 - Never log `bosch_config.json` contents
 - Log path: `~/.cache/bosch-camera-mcp/server.log` (rotating, 5 × 1 MB)
 
+## Transport
+
+### Available transports
+
+| CLI flag | FastMCP arg | Use case |
+|---|---|---|
+| `--transport stdio` (default) | `transport="stdio"` | Claude Code / Desktop — local subprocess |
+| `--transport http` | `transport="streamable-http"` | Remote / multi-client HTTP |
+| `--transport sse` | `transport="sse"` | Legacy SSE clients |
+
+### FastMCP API (mcp 1.27.1)
+
+```python
+FastMCP(name, host="127.0.0.1", port=8000, ...)  # host/port set on constructor / mcp.settings
+mcp.run(transport: Literal["stdio", "sse", "streamable-http"] = "stdio") -> None
+```
+
+Host and port are stored in `mcp.settings.host` / `mcp.settings.port` and consumed by
+`run_streamable_http_async()` / `run_sse_async()` via uvicorn. The `main()` function
+mutates `mcp.settings` before calling `mcp.run()` when `--transport http|sse` is requested.
+The `mount_path` parameter of `mcp.run()` is not used (defaults to `/`).
+
+### Threat model — transport layer
+
+**stdio (default)**
+- Inherently local: server stdin/stdout are the only I/O path.
+- No network socket is opened. No firewall rules required.
+- Process lifetime is tied to the MCP host (Claude Code/Desktop).
+
+**streamable-HTTP / SSE**
+- A uvicorn HTTP server is started; default bind is `127.0.0.1` (loopback only).
+- `--http-host 0.0.0.0` exposes the server to the LAN/WAN.
+  **Only set this in firewalled, trusted network environments.**
+  The server logs a WARNING when a non-localhost host is configured.
+- No auth middleware is included in the alpha. Do not expose to the internet
+  without an authenticating reverse proxy (nginx, Caddy, Cloudflare Tunnel).
+- The `/mcp` endpoint (streamable-HTTP) and `/sse` endpoint handle all MCP
+  JSON-RPC traffic. Both are unauthenticated in the current implementation.
+
+## Packaging
+
+### Build artifacts
+
+Built with `python -m build` (setuptools backend):
+
+| Artifact | Format | Notes |
+|---|---|---|
+| `bosch_smart_home_camera_mcp-<ver>-py3-none-any.whl` | Wheel | Pure-Python, any platform |
+| `bosch_smart_home_camera_mcp-<ver>.tar.gz` | sdist | Source distribution |
+
+### Entry point
+
+```toml
+[project.scripts]
+bosch-smart-home-camera-mcp = "bosch_camera_mcp.server:main"
+```
+
+### pipx / uvx compatibility
+
+The package is designed for `pipx install` (persistent isolated env) and
+`uvx` (ephemeral one-shot). Both work because:
+1. The entry point `bosch-smart-home-camera-mcp` is declared in `[project.scripts]`.
+2. All runtime dependencies (`mcp`, `pydantic`, `requests`, `urllib3`) are declared
+   in `[project.dependencies]` — no implicit sys.path assumptions.
+3. The package is pure-Python (`py3-none-any.whl`) — no compiled extensions.
+
+Note: the sister CLI (`bosch_camera.py`) is still loaded via sys.path injection
+(Option C). `pipx`/`uvx` users must set `BOSCH_CAMERA_CLI_PATH` or use `--config`
+with a pre-authenticated `bosch_config.json` from a separate CLI checkout.
+This limitation is tracked for v0.6.0 (Option B library refactor).
+
 ## Security boundary
 
 The MCP server runs **with the local user's privileges** — there is no privilege escalation path. The threat model:

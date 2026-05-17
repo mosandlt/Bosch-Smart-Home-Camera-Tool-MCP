@@ -1,10 +1,15 @@
-"""MCP server entrypoint — v0.4.0-alpha.
+"""MCP server entrypoint — v0.5.0-alpha.
 
 All 8 tool bodies are now wired to the sister CLI's bosch_camera.py via
 bosch_camera_mcp.adapters.cli_bridge (Option C: sys.path injection).
 Resources and prompts are registered by importing resources.py / prompts.py
 at the bottom of this module (the @mcp.resource / @mcp.prompt decorators
 self-register against the shared `mcp` FastMCP instance).
+
+Transport modes:
+- stdio (default): for Claude Code / Claude Desktop local use
+- streamable-http: for remote / multi-client deployments (binds 127.0.0.1 by default)
+- sse: legacy SSE transport (also binds 127.0.0.1 by default)
 """
 
 from __future__ import annotations
@@ -339,6 +344,28 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Enable verbose logging to stderr",
     )
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "http", "sse"],
+        default="stdio",
+        help="Transport protocol: stdio (default, Claude Code/Desktop), "
+             "http (streamable-HTTP, remote/multi-client), "
+             "sse (legacy SSE)",
+    )
+    parser.add_argument(
+        "--http-host",
+        default="127.0.0.1",
+        dest="http_host",
+        help="Bind host for HTTP/SSE transports (default: 127.0.0.1). "
+             "WARNING: set to 0.0.0.0 only in trusted network environments.",
+    )
+    parser.add_argument(
+        "--http-port",
+        type=int,
+        default=8765,
+        dest="http_port",
+        help="Listen port for HTTP/SSE transports (default: 8765)",
+    )
     return parser.parse_args(argv)
 
 
@@ -352,12 +379,34 @@ def main(argv: list[str] | None = None) -> int:
         stream=sys.stderr,
     )
     _CONFIG_PATH = args.config
+
+    if args.transport in ("http", "sse"):
+        # Reconfigure the shared FastMCP instance with the requested host/port.
+        # FastMCP stores host+port in mcp.settings (pydantic model); the cleanest
+        # way to override them without re-creating the instance (which would lose
+        # all registered tools/resources/prompts) is to mutate settings directly.
+        mcp.settings.host = args.http_host
+        mcp.settings.port = args.http_port
+        if args.http_host != "127.0.0.1":
+            logger.warning(
+                "HTTP transport bound to %s — ensure this host is firewalled.",
+                args.http_host,
+            )
+
     logger.info(
-        "starting bosch-smart-home-camera-mcp v%s (config=%s)",
+        "starting bosch-smart-home-camera-mcp v%s transport=%s config=%s",
         __version__,
+        args.transport,
         args.config,
     )
-    mcp.run()
+
+    if args.transport == "http":
+        mcp.run(transport="streamable-http")
+    elif args.transport == "sse":
+        mcp.run(transport="sse")
+    else:
+        mcp.run(transport="stdio")
+
     return 0
 
 

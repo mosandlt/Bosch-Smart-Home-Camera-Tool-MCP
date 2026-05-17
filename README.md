@@ -5,7 +5,7 @@
 > Reuses the proven reverse-engineered API client from the sister
 > [Python CLI tool](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python).
 >
-> **Status:** v0.4.0-alpha — resources + prompts added (8 tools + 3 resources + 2 prompts, not yet released)
+> **Status:** v0.5.0-alpha — streamable-HTTP transport + pipx/uvx packaging (8 tools + 3 resources + 2 prompts, not yet released)
 
 [![License][license-shield]](LICENSE)
 [![Project Maintenance][maintenance-shield]][user_profile]
@@ -112,10 +112,29 @@ Server runs **with the user's existing `bosch_config.json`** from the sister Pyt
 
 The MCP server never reads or writes credentials beyond what the CLI tool already does (token refresh on 401, atomic save).
 
-## Transport
+## Transport modes
 
-- **stdio** (default for Claude Code / Desktop)
-- **streamable HTTP** (planned v0.2.0) for remote access from non-local hosts
+Three transport modes are supported via the `--transport` flag:
+
+| Mode | Flag | Use case |
+|---|---|---|
+| `stdio` | `--transport stdio` (default) | Claude Code / Claude Desktop — local subprocess |
+| `streamable-http` | `--transport http` | Remote / multi-client deployments over HTTP |
+| `sse` | `--transport sse` | Legacy SSE clients |
+
+HTTP and SSE modes bind to `127.0.0.1:8765` by default (security-safe local-only).
+Pass `--http-host 0.0.0.0` only in trusted, firewalled network environments.
+
+```bash
+# stdio (default) — used by Claude Code / Claude Desktop
+bosch-smart-home-camera-mcp --config ~/.config/bosch-camera/bosch_config.json
+
+# streamable-HTTP — local port for multi-client use
+bosch-smart-home-camera-mcp --transport http --http-port 8765
+
+# streamable-HTTP — expose to LAN (ensure firewall rules!)
+bosch-smart-home-camera-mcp --transport http --http-host 0.0.0.0 --http-port 8765
+```
 
 ## Tech stack
 
@@ -124,19 +143,34 @@ The MCP server never reads or writes credentials beyond what the CLI tool alread
 - `pydantic` (already a transitive dep of `mcp`) for tool schemas
 - Reuse: `bosch_camera.py` from sister repo as a Git submodule **or** as a Python import path
 
-## Installation (planned)
+## Installation
 
 ```bash
+# via pipx (recommended for end users — isolated environment, PATH entry)
 pipx install bosch-smart-home-camera-mcp
-# or
-uvx bosch-smart-home-camera-mcp
+
+# via uvx (zero-install, one-shot — no persistent env needed)
+uvx bosch-smart-home-camera-mcp --help
+
+# from source (for development)
+pip install -e .[test]
 ```
 
-Add to Claude Code:
+### Add to Claude Code — stdio (local, recommended)
 
 ```bash
 claude mcp add bosch-camera -- bosch-smart-home-camera-mcp \
   --config ~/.config/bosch-camera/bosch_config.json
+```
+
+### Add to Claude Code — streamable-HTTP (remote server)
+
+```bash
+# Start server first:
+bosch-smart-home-camera-mcp --transport http --http-port 8765
+
+# Then register the HTTP endpoint:
+claude mcp add bosch-camera --transport http http://127.0.0.1:8765/mcp
 ```
 
 ## Repo layout
@@ -175,7 +209,7 @@ Bosch-Smart-Home-Camera-Tool-MCP/
 - **v0.1.0** — concept doc + skeleton server, all tools defined but not yet implemented (returns `NotImplementedError`) ✅
 - **v0.2.0** — all 8 tools wired: read tools (list, status, events, snapshot) + write tools (privacy, light, pan, notifications) via sys.path injection (Option C) ✅
 - **v0.4.0** — resources (`bosch://cameras`, `bosch://cameras/{name}/snapshot.jpg`, `bosch://cameras/{name}/events`) + prompts (`daily-camera-summary`, `pre-leave-check`) ✅
-- **v0.5.0** — streamable-HTTP transport, packaging for `pipx`/`uvx`
+- **v0.5.0** — streamable-HTTP transport (`--transport http|sse|stdio`), packaging for `pipx`/`uvx`, 24 new tests ✅
 - **v0.6.0** — refactor CLI into importable library (Option B)
 - **v1.0.0** — published to PyPI
 
