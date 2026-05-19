@@ -65,6 +65,35 @@ These flows require an LLM in the loop — which is exactly what MCP is for.
 
 The MCP server is a thin wrapper around the Python CLI's API layer. It does **not** re-implement OAuth, token refresh, FCM push, RTSP, or RCP — it imports them.
 
+### LAN-fallback tool routing
+
+```mermaid
+flowchart LR
+    Agent["LLM / Claude Code"] -->|tool call| MCP[MCP Server]
+    MCP -->|prefer_local=False| Cloud[Bosch CBS API]
+    MCP -->|prefer_local=True| RCP["Camera LAN RCP\n192.168.x.y:443\nHTTPS Digest"]
+    RCP -->|success| Done["return {status, method: local}"]
+    RCP -->|fail| Cloud
+    Cloud --> Done2["return {status, method: cloud}"]
+    style RCP fill:#d4f1c4,color:#000
+    style Cloud fill:#dce8fb,color:#000
+```
+
+### `bosch_camera_lan_ping` tool flow
+
+```mermaid
+sequenceDiagram
+    participant Agent as LLM Agent
+    participant Tool as bosch_camera_lan_ping
+    participant TCP as TCP connect :443
+
+    Agent->>Tool: {camera_name: "Outdoor"}
+    Tool->>Tool: resolve LAN IP from bosch_config.json
+    Tool->>TCP: connect 192.168.x.y:443 (1.5 s timeout)
+    TCP-->>Tool: connected / timeout
+    Tool-->>Agent: {reachable: true, ip: "...", latency_ms: 12}
+```
+
 ## Planned MCP tools (v0.1.0)
 
 | Tool | Description | Returns |
