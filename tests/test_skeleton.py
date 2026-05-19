@@ -14,6 +14,7 @@ import pytest
 from bosch_camera_mcp import __version__
 from bosch_camera_mcp.server import (
     bosch_camera_events,
+    bosch_camera_lan_ping,
     bosch_camera_light_set,
     bosch_camera_list,
     bosch_camera_maintenance_status,
@@ -28,9 +29,9 @@ from bosch_camera_mcp.server import (
 
 
 class TestVersion:
-    def test_version_is_v1_2_0(self) -> None:
-        """v1.2.0 — maintenance status tool."""
-        assert __version__ == "1.2.0"
+    def test_version_is_v1_3_0(self) -> None:
+        """v1.3.0 — LAN-fallback feature set."""
+        assert __version__ == "1.3.0"
 
 
 class TestServerApp:
@@ -89,3 +90,7 @@ class TestToolSurface:
     def test_tool_maintenance_status_is_wired(self) -> None:
         assert callable(bosch_camera_maintenance_status)
         assert self._is_wired(bosch_camera_maintenance_status)
+
+    def test_tool_lan_ping_is_wired(self) -> None:
+        assert callable(bosch_camera_lan_ping)
+        assert self._is_wired(bosch_camera_lan_ping)

@@ -475,7 +475,7 @@ class TestPrivacySet:
         body = json.loads(resp_lib.calls[0].request.body)
         assert body["privacyMode"] == "OFF"
 
-    def test_privacy_set_returns_camera_status(self, patch_bosch_camera, monkeypatch):
+    async def test_privacy_set_returns_camera_status(self, patch_bosch_camera, monkeypatch):
         """bosch_camera_privacy_set returns CameraStatus after set."""
         import bosch_camera_mcp.adapters.cli_bridge as bridge
 
@@ -483,7 +483,7 @@ class TestPrivacySet:
 
         from bosch_camera_mcp.server import CameraStatus, bosch_camera_privacy_set
 
-        result = bosch_camera_privacy_set(camera="Garten", enabled=True)
+        result = await bosch_camera_privacy_set(camera="Garten", enabled=True)
         assert isinstance(result, CameraStatus)
 
 
@@ -530,14 +530,14 @@ class TestLightSet:
         body = json.loads(resp_lib.calls[0].request.body)
         assert body["frontLightOn"] is False
 
-    def test_light_set_returns_camera_status(self, patch_bosch_camera, monkeypatch):
+    async def test_light_set_returns_camera_status(self, patch_bosch_camera, monkeypatch):
         import bosch_camera_mcp.adapters.cli_bridge as bridge
 
         monkeypatch.setattr(bridge, "set_light", lambda s, cam_id, enabled: True)
 
         from bosch_camera_mcp.server import CameraStatus, bosch_camera_light_set
 
-        result = bosch_camera_light_set(camera="Garten", enabled=True)
+        result = await bosch_camera_light_set(camera="Garten", enabled=True)
         assert isinstance(result, CameraStatus)
 
 

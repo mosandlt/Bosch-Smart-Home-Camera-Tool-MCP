@@ -5,7 +5,7 @@
 > Reuses the proven reverse-engineered API client from the sister
 > [Python CLI tool](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python).
 >
-> **Status:** v1.2.0 — maintenance status tool: fetch cloud maintenance announcements from the community RSS feed (10 tools + 3 resources + 2 prompts, stdio/SSE/streamable-HTTP, pipx/uvx-installable)
+> **Status:** v1.3.0 — LAN-fallback feature set: `bosch_camera_lan_ping`, `prefer_local` on privacy/light writes, `recommended_action` on maintenance status (11 tools + 3 resources + 2 prompts, stdio/SSE/streamable-HTTP, pipx/uvx-installable)
 
 [![License][license-shield]](LICENSE)
 [![Project Maintenance][maintenance-shield]][user_profile]
@@ -74,12 +74,13 @@ The MCP server is a thin wrapper around the Python CLI's API layer. It does **no
 | `bosch_camera_snapshot` | LAN-only JPEG capture (no cloud) — HTTP Digest to camera IP | `{path, method, timestamp}` |
 | `bosch_camera_stream_url` | LAN-only RTSPS stream URL (no cloud relay) — consumable by ffmpeg/VLC/go2rtc | `{camera, rtsps_url, note}` |
 | `bosch_camera_events` | List recent motion/person/audio events | array of `{event_id, type, timestamp, has_clip}` |
-| `bosch_camera_privacy_set` | Turn privacy mode on/off | `{camera, privacy_mode}` |
-| `bosch_camera_light_set` | Turn camera spotlight on/off (Gen1+Gen2) | `{camera, light_on}` |
+| `bosch_camera_privacy_set` | Turn privacy mode on/off; `prefer_local=True` routes to LAN RCP first | `{name, status, privacy_mode, ...}` |
+| `bosch_camera_light_set` | Turn spotlight on/off; `prefer_local=True` routes to LAN RCP first | `{name, status, light_on, ...}` |
 | `bosch_camera_pan` | Pan the 360° camera | `{camera, position}` |
 | `bosch_camera_notifications_set` | Toggle push notifications | `{camera, notifications_on}` |
 | `bosch_camera_info` | Verbose camera info (firmware, IP, stream URLs) | full dict |
-| `bosch_camera_maintenance_status` | Fetch current cloud maintenance announcement from community RSS feed | `{state, title, link, pub_date, summary, scheduled_start, scheduled_end, source, camera_relevant}` |
+| `bosch_camera_lan_ping` | TCP-probe a camera on LAN port 443 (1.5 s timeout) | `{reachable, ip, latency_ms}` |
+| `bosch_camera_maintenance_status` | Fetch current cloud maintenance announcement from community RSS feed | `{state, title, link, pub_date, summary, scheduled_start, scheduled_end, source, camera_relevant, recommended_action}` |
 
 Tools intentionally NOT exposed to LLMs (write-risky / time-consuming):
 - Live RTSP stream URLs (no LLM use case)
@@ -113,8 +114,11 @@ Snapshots and stream URLs go directly from the MCP host to the camera over the L
 |---|---|
 | `bosch_camera_snapshot` | LAN only — HTTP Digest to camera IP |
 | `bosch_camera_stream_url` | LAN only — RTSPS via local Bosch TLS proxy |
+| `bosch_camera_lan_ping` | LAN only — TCP connect to camera port 443 |
 | `bosch_camera_list` / `status` / `events` | Bosch cloud (no local API yet) |
-| `bosch_camera_privacy_set` / `light_set` / `pan` / `notifications_set` | Bosch cloud (no local API yet) |
+| `bosch_camera_privacy_set` / `light_set` (default) | Bosch cloud |
+| `bosch_camera_privacy_set` / `light_set` (`prefer_local=True`) | LAN-RCP first, cloud fallback — Gen2 only |
+| `bosch_camera_pan` / `notifications_set` | Bosch cloud (no local API yet) |
 
 The MCP host must be on the same network as the cameras for media tools to work. If it isn't, the snapshot/stream tools surface `local_unavailable` rather than falling back to cloud — by design.
 
@@ -228,7 +232,8 @@ Bosch-Smart-Home-Camera-Tool-MCP/
 - **v1.0.0** — first stable release: 106 tests, published wheel + sdist on GitHub Releases, PyPI publish pending ✅
 - **v1.1.0** — LAN-only media path (privacy hardened): `bosch_camera_snapshot` and new `bosch_camera_stream_url` go directly to camera over LAN, no Bosch cloud relay for media. 113 tests. ✅
 - **v1.2.0** — `bosch_camera_maintenance_status` tool: fetches cloud maintenance announcements from community RSS feeds; returns state (active/scheduled/past/recent/unknown/idle), title, time window, link. ✅
-- **v1.3.0 (next)** — refactor sister CLI into importable `bosch_camera_lib` package (Option B), removing the sys.path injection
+- **v1.3.0** — LAN-fallback feature set (ported from HA integration v12.4.10): `bosch_camera_lan_ping` tool (TCP-probe any camera on LAN); `prefer_local=True` on `bosch_camera_privacy_set` / `bosch_camera_light_set` (RCP-LAN write path, Gen2, cloud fallback on failure); `recommended_action` field on `bosch_camera_maintenance_status` (`"check_lan"` when active, `"wait"` when scheduled). 173 tests. ✅
+- **v1.4.0 (next)** — refactor sister CLI into importable `bosch_camera_lib` package (Option B), removing the sys.path injection
 
 ## License
 

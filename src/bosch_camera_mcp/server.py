@@ -1,4 +1,4 @@
-"""MCP server entrypoint — v0.5.0-alpha.
+"""MCP server entrypoint — v1.3.0.
 
 All 8 tool bodies are now wired to the sister CLI's bosch_camera.py via
 bosch_camera_mcp.adapters.cli_bridge (Option C: sys.path injection).
@@ -75,6 +75,16 @@ class StreamUrlResult(BaseModel):
     camera: str = Field(description="Canonical camera name from config")
     rtsps_url: str = Field(description="LAN RTSPS URL via TLS proxy (rtsps://<user>:<pass>@<ip>:443/...)")
     note: str = "LAN-only — MCP host must be on the same network as the camera."
+
+
+class LanPingResult(BaseModel):
+    """LAN TCP reachability probe result."""
+
+    reachable: bool = Field(description="True if the camera responded within the timeout")
+    ip: str = Field(description="IP address that was probed")
+    latency_ms: float = Field(
+        description="Round-trip latency in milliseconds, or -1.0 if unreachable"
+    )
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -295,25 +305,127 @@ def bosch_camera_events(camera: str, limit: int = 10) -> list[dict[str, Any]]:
 
 
 @mcp.tool()
-def bosch_camera_privacy_set(camera: str, enabled: bool) -> CameraStatus:
-    """Turn privacy mode on or off. enabled=True hides the camera."""
+async def bosch_camera_lan_ping(
+    camera: Optional[str] = None,
+    lan_ip: Optional[str] = None,
+) -> LanPingResult:
+    """Probe whether a camera is reachable on the LAN (TCP port 443, 1.5 s timeout).
+
+    Pass either ``camera`` (resolved against bosch_config.json) or a raw
+    ``lan_ip``.  Useful when diagnosing cloud-down situations: if this returns
+    ``reachable=true`` while the cloud API is returning 5xx, privacy/light writes
+    via ``prefer_local=True`` will work without waiting for Bosch infrastructure.
+
+    Returns ``{reachable, ip, latency_ms}``.
+    """
+    from .lan_rcp import lan_tcp_ping  # noqa: PLC0415
+
+    if lan_ip is not None:
+        ip = lan_ip.strip()
+    elif camera is not None:
+        br = _bridge()
+        _cfg, _session, cameras = _get_session()
+        _name, cam_info = br._resolve_cam(cameras, camera)
+        ip = cam_info.get("local_ip", "").strip()
+        if not ip:
+            raise MCPError(
+                code="local_unavailable",
+                detail=(
+                    f"No local_ip configured for camera {camera!r}. "
+                    "Add local_ip in bosch_config.json."
+                ),
+                camera=camera,
+            )
+    else:
+        raise MCPError(
+            code="api_unreachable",
+            detail="Provide either camera (name) or lan_ip.",
+        )
+
+    reachable, latency_ms = await lan_tcp_ping(ip)
+    return LanPingResult(reachable=reachable, ip=ip, latency_ms=latency_ms)
+
+
+@mcp.tool()
+async def bosch_camera_privacy_set(
+    camera: str,
+    enabled: bool,
+    prefer_local: bool = False,
+) -> CameraStatus:
+    """Turn privacy mode on or off. enabled=True hides the camera.
+
+    When ``prefer_local=True``, attempt the RCP-LAN write path FIRST (skipping
+    the Bosch cloud entirely). Useful when the agent already knows the cloud is
+    down but the camera is LAN-reachable (confirmed via ``bosch_camera_lan_ping``).
+    Falls back to the cloud API automatically if the LAN write fails or if no
+    ``local_ip`` is configured.
+    """
     br = _bridge()
     cfg, session, cameras = _get_session()
     br.ensure_cli_importable()
 
     name, cam_info = br._resolve_cam(cameras, camera)
+
+    if prefer_local:
+        local_ip = cam_info.get("local_ip", "").strip()
+        if local_ip:
+            from .lan_rcp import rcp_local_write_privacy  # noqa: PLC0415
+
+            ok = await rcp_local_write_privacy(local_ip, enabled)
+            if ok:
+                logger.info(
+                    "privacy_set(%s, %s): succeeded via LOCAL RCP (%s)", name, enabled, local_ip
+                )
+                return _build_status(name, cam_info, session, cfg)
+            logger.warning(
+                "privacy_set(%s, %s): LOCAL RCP failed (%s), falling back to cloud",
+                name,
+                enabled,
+                local_ip,
+            )
+
     br.set_privacy_mode(session, cam_info["id"], enabled)
     return _build_status(name, cam_info, session, cfg)
 
 
 @mcp.tool()
-def bosch_camera_light_set(camera: str, enabled: bool) -> CameraStatus:
-    """Turn the camera's spotlight on or off. Applies to Gen1 + Gen2 outdoor cameras."""
+async def bosch_camera_light_set(
+    camera: str,
+    enabled: bool,
+    prefer_local: bool = False,
+) -> CameraStatus:
+    """Turn the camera's spotlight on or off. Applies to Gen1 + Gen2 outdoor cameras.
+
+    When ``prefer_local=True``, attempt the RCP-LAN write path FIRST (skipping
+    the Bosch cloud entirely). Maps ``enabled=True`` to brightness 100, ``False``
+    to 0.  Falls back to the cloud API automatically if the LAN write fails or if
+    no ``local_ip`` is configured.  Wallwasher RGB is always cloud-only.
+    """
     br = _bridge()
     cfg, session, cameras = _get_session()
     br.ensure_cli_importable()
 
     name, cam_info = br._resolve_cam(cameras, camera)
+
+    if prefer_local:
+        local_ip = cam_info.get("local_ip", "").strip()
+        if local_ip:
+            from .lan_rcp import rcp_local_write_front_light  # noqa: PLC0415
+
+            brightness = 100 if enabled else 0
+            ok = await rcp_local_write_front_light(local_ip, brightness)
+            if ok:
+                logger.info(
+                    "light_set(%s, %s): succeeded via LOCAL RCP (%s)", name, enabled, local_ip
+                )
+                return _build_status(name, cam_info, session, cfg)
+            logger.warning(
+                "light_set(%s, %s): LOCAL RCP failed (%s), falling back to cloud",
+                name,
+                enabled,
+                local_ip,
+            )
+
     br.set_light(session, cam_info["id"], enabled)
     return _build_status(name, cam_info, session, cfg)
 
@@ -344,14 +456,38 @@ def bosch_camera_notifications_set(camera: str, enabled: bool) -> CameraStatus:
 
 @mcp.tool()
 async def bosch_camera_maintenance_status() -> dict[str, Any]:
-    """Fetch the current Bosch Smart Home cloud maintenance announcement from the official community RSS feed. Returns title, time window, link, and state (active/scheduled/past/recent/unknown/idle). Use this when users ask why cameras are unavailable or when the cloud returns 5xx errors."""
+    """Fetch the current Bosch Smart Home cloud maintenance announcement from the official community RSS feed.
+
+    Returns title, time window, link, state (active/scheduled/past/recent/unknown/idle),
+    and a ``recommended_action`` hint for the calling agent:
+
+    - ``"check_lan"`` — state is ``"active"`` (outage/maintenance in progress):
+      run ``bosch_camera_lan_ping`` to check per-camera LAN reachability, then use
+      ``prefer_local=True`` on privacy/light writes while the cloud is down.
+    - ``"wait"`` — state is ``"scheduled"``: outage is upcoming; no action needed yet.
+    - ``null`` — state is past/recent/unknown/idle: normal operation expected.
+
+    Use this tool when users ask why cameras are unavailable or when the cloud
+    returns 5xx errors.
+    """
     from .maintenance import async_fetch_maintenance  # noqa: PLC0415
 
     mw = await async_fetch_maintenance()
     if mw is None:
-        return {"state": "idle", "summary": "No maintenance announcement found"}
+        return {
+            "state": "idle",
+            "summary": "No maintenance announcement found",
+            "recommended_action": None,
+        }
     result: dict[str, Any] = mw.as_dict()
-    result["state"] = mw.state()
+    state = mw.state()
+    result["state"] = state
+    if state == "active":
+        result["recommended_action"] = "check_lan"
+    elif state == "scheduled":
+        result["recommended_action"] = "wait"
+    else:
+        result["recommended_action"] = None
     return result
 
 

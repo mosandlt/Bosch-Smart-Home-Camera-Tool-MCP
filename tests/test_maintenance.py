@@ -373,7 +373,9 @@ class TestMaintenanceTool:
         with patch("bosch_camera_mcp.maintenance.httpx.AsyncClient", return_value=fake):
             from bosch_camera_mcp.server import bosch_camera_maintenance_status
             result = await bosch_camera_maintenance_status()
-        assert result == {"state": "idle", "summary": "No maintenance announcement found"}
+        assert result["state"] == "idle"
+        assert result["summary"] == "No maintenance announcement found"
+        assert result["recommended_action"] is None
 
     async def test_tool_returns_dict_with_state_on_success(self) -> None:
         fake = _make_mock_client({"Wartungsarbeiten": (200, REAL_RSS)})
