@@ -69,7 +69,7 @@ class TestModuleImport:
         assert hasattr(srv, "_parse_args")
         assert hasattr(srv, "mcp")
 
-    def test_version_is_v1_1_0(self) -> None:
-        """Canonical version check for v1.1.0 — LAN-only media path release."""
+    def test_version_is_v1_2_0(self) -> None:
+        """Canonical version check for v1.2.0 — maintenance status tool."""
         from bosch_camera_mcp import __version__
-        assert __version__ == "1.1.0"
+        assert __version__ == "1.2.0"

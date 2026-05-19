@@ -342,6 +342,19 @@ def bosch_camera_notifications_set(camera: str, enabled: bool) -> CameraStatus:
     return _build_status(name, cam_info, session, cfg)
 
 
+@mcp.tool()
+async def bosch_camera_maintenance_status() -> dict[str, Any]:
+    """Fetch the current Bosch Smart Home cloud maintenance announcement from the official community RSS feed. Returns title, time window, link, and state (active/scheduled/past/recent/unknown/idle). Use this when users ask why cameras are unavailable or when the cloud returns 5xx errors."""
+    from .maintenance import async_fetch_maintenance  # noqa: PLC0415
+
+    mw = await async_fetch_maintenance()
+    if mw is None:
+        return {"state": "idle", "summary": "No maintenance announcement found"}
+    result: dict[str, Any] = mw.as_dict()
+    result["state"] = mw.state()
+    return result
+
+
 # ── Register resources + prompts ──────────────────────────────────────────────
 # Importing these modules causes their @mcp.resource / @mcp.prompt decorators
 # to execute, self-registering against the shared `mcp` FastMCP instance above.

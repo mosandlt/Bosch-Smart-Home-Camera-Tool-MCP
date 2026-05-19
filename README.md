@@ -5,7 +5,7 @@
 > Reuses the proven reverse-engineered API client from the sister
 > [Python CLI tool](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python).
 >
-> **Status:** v1.1.0 — LAN-only media (privacy hardened): snapshot + stream URL go directly to camera, no Bosch cloud relay for media (9 tools + 3 resources + 2 prompts, stdio/SSE/streamable-HTTP, pipx/uvx-installable)
+> **Status:** v1.2.0 — maintenance status tool: fetch cloud maintenance announcements from the community RSS feed (10 tools + 3 resources + 2 prompts, stdio/SSE/streamable-HTTP, pipx/uvx-installable)
 
 [![License][license-shield]](LICENSE)
 [![Project Maintenance][maintenance-shield]][user_profile]
@@ -79,6 +79,7 @@ The MCP server is a thin wrapper around the Python CLI's API layer. It does **no
 | `bosch_camera_pan` | Pan the 360° camera | `{camera, position}` |
 | `bosch_camera_notifications_set` | Toggle push notifications | `{camera, notifications_on}` |
 | `bosch_camera_info` | Verbose camera info (firmware, IP, stream URLs) | full dict |
+| `bosch_camera_maintenance_status` | Fetch current cloud maintenance announcement from community RSS feed | `{state, title, link, pub_date, summary, scheduled_start, scheduled_end, source, camera_relevant}` |
 
 Tools intentionally NOT exposed to LLMs (write-risky / time-consuming):
 - Live RTSP stream URLs (no LLM use case)
@@ -226,7 +227,8 @@ Bosch-Smart-Home-Camera-Tool-MCP/
 - **v0.5.0** — streamable-HTTP transport (`--transport http|sse|stdio`), packaging for `pipx`/`uvx`, 24 new tests ✅
 - **v1.0.0** — first stable release: 106 tests, published wheel + sdist on GitHub Releases, PyPI publish pending ✅
 - **v1.1.0** — LAN-only media path (privacy hardened): `bosch_camera_snapshot` and new `bosch_camera_stream_url` go directly to camera over LAN, no Bosch cloud relay for media. 113 tests. ✅
-- **v1.2.0 (next)** — refactor sister CLI into importable `bosch_camera_lib` package (Option B), removing the sys.path injection
+- **v1.2.0** — `bosch_camera_maintenance_status` tool: fetches cloud maintenance announcements from community RSS feeds; returns state (active/scheduled/past/recent/unknown/idle), title, time window, link. ✅
+- **v1.3.0 (next)** — refactor sister CLI into importable `bosch_camera_lib` package (Option B), removing the sys.path injection
 
 ## License
 

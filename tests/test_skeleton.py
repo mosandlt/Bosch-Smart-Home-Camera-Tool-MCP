@@ -16,6 +16,7 @@ from bosch_camera_mcp.server import (
     bosch_camera_events,
     bosch_camera_light_set,
     bosch_camera_list,
+    bosch_camera_maintenance_status,
     bosch_camera_notifications_set,
     bosch_camera_pan,
     bosch_camera_privacy_set,
@@ -27,9 +28,9 @@ from bosch_camera_mcp.server import (
 
 
 class TestVersion:
-    def test_version_is_v1_1_0(self) -> None:
-        """v1.1.0 — LAN-only media path release."""
-        assert __version__ == "1.1.0"
+    def test_version_is_v1_2_0(self) -> None:
+        """v1.2.0 — maintenance status tool."""
+        assert __version__ == "1.2.0"
 
 
 class TestServerApp:
@@ -84,3 +85,7 @@ class TestToolSurface:
     def test_tool_stream_url_is_wired(self) -> None:
         assert callable(bosch_camera_stream_url)
         assert self._is_wired(bosch_camera_stream_url)
+
+    def test_tool_maintenance_status_is_wired(self) -> None:
+        assert callable(bosch_camera_maintenance_status)
+        assert self._is_wired(bosch_camera_maintenance_status)
