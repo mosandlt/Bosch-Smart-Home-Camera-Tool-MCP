@@ -214,8 +214,22 @@ class TestPrefers:
         defaults.update(kw)
         return MaintenanceWindow(**defaults)  # type: ignore[arg-type]
 
-    def test_active_beats_scheduled(self) -> None:
-        now = datetime(2026, 5, 19, 7, 0, tzinfo=timezone.utc)
+    def test_active_beats_scheduled(self, monkeypatch) -> None:
+        # Stub datetime.now in the maintenance module so _prefers's internal
+        # state() call (which uses utcnow as default) lands inside the active
+        # window. Avoids the wall-clock-dependent failure that only passed
+        # between 05:00 and 09:00 UTC.
+        from bosch_camera_mcp import maintenance as _m
+        # Some implementations import datetime as a module symbol; patch the
+        # module-level binding the helper uses.
+        fixed = datetime(2026, 5, 19, 7, 0, tzinfo=timezone.utc)
+
+        class _FrozenDT(datetime):
+            @classmethod
+            def now(cls, tz: timezone | None = None) -> "datetime":  # type: ignore[override]
+                return fixed if tz is None else fixed.astimezone(tz)
+
+        monkeypatch.setattr(_m, "datetime", _FrozenDT)
         active = self._mw(
             scheduled_start=datetime(2026, 5, 19, 5, 0, tzinfo=timezone.utc),
             scheduled_end=datetime(2026, 5, 19, 9, 0, tzinfo=timezone.utc),
@@ -224,8 +238,8 @@ class TestPrefers:
             scheduled_start=datetime(2026, 5, 20, 5, 0, tzinfo=timezone.utc),
             scheduled_end=datetime(2026, 5, 20, 9, 0, tzinfo=timezone.utc),
         )
-        assert active.state(now) == "active"
-        assert scheduled.state(now) == "scheduled"
+        assert active.state() == "active"
+        assert scheduled.state() == "scheduled"
         assert _prefers(active, scheduled)
 
     def test_camera_relevant_breaks_tie(self) -> None:
