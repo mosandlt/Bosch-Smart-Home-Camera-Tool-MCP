@@ -540,6 +540,51 @@ class TestLightSet:
         result = await bosch_camera_light_set(camera="Garten", enabled=True)
         assert isinstance(result, CameraStatus)
 
+    async def test_light_set_indoor_no_light_raises_hardware_unsupported(
+        self, patch_bosch_camera, monkeypatch
+    ):
+        """Regression: bosch_camera_light_set on Indoor II (has_light=False) must raise
+        MCPError(hardware_unsupported) immediately — no Bosch cloud API call made.
+
+        Bug reported via user observation: Indoor II returned a kryptischen Bosch-API
+        HTTP 4xx error instead of a readable "no light hardware" message.
+        Fixed in v1.3.2 by checking cam_info['has_light'] before set_light().
+        """
+        import bosch_camera_mcp.adapters.cli_bridge as bridge
+        from bosch_camera_mcp.errors import MCPError
+        from bosch_camera_mcp.server import bosch_camera_light_set
+
+        api_called: list[bool] = []
+
+        def _set_light_spy(s, cam_id, enabled):  # type: ignore[no-untyped-def]
+            api_called.append(True)
+            return True
+
+        monkeypatch.setattr(bridge, "set_light", _set_light_spy)
+
+        with pytest.raises(MCPError) as exc_info:
+            await bosch_camera_light_set(camera="Innen", enabled=True)
+
+        err = exc_info.value
+        assert err.code == "hardware_unsupported"
+        assert "Innen" in err.detail
+        assert "HOME_Eyes_Indoor" in err.detail
+        assert "Eyes Outdoor II" in err.detail
+        # Confirm no cloud API call was made
+        assert api_called == [], "set_light() must not be called for no-light cameras"
+
+    async def test_light_set_indoor_off_no_light_raises_hardware_unsupported(
+        self, patch_bosch_camera, monkeypatch
+    ):
+        """Same gate applies for enabled=False — no special-casing the off-direction."""
+        from bosch_camera_mcp.errors import MCPError
+        from bosch_camera_mcp.server import bosch_camera_light_set
+
+        with pytest.raises(MCPError) as exc_info:
+            await bosch_camera_light_set(camera="Innen", enabled=False)
+
+        assert exc_info.value.code == "hardware_unsupported"
+
 
 # ---------------------------------------------------------------------------
 # bosch_camera_pan

@@ -1,4 +1,4 @@
-"""MCP server entrypoint — v1.3.1.
+"""MCP server entrypoint — v1.3.2.
 
 All 8 tool bodies are now wired to the sister CLI's bosch_camera.py via
 bosch_camera_mcp.adapters.cli_bridge (Option C: sys.path injection).
@@ -396,7 +396,11 @@ async def bosch_camera_light_set(
     enabled: bool,
     prefer_local: bool = False,
 ) -> CameraStatus:
-    """Turn the camera's spotlight on or off. Applies to Gen1 + Gen2 outdoor cameras.
+    """Turn the camera's spotlight on or off.
+
+    Only for cameras with ``featureSupport.light=true`` (currently: Eyes Outdoor II /
+    HOME_Eyes_Outdoor).  Raises ``hardware_unsupported`` immediately for cameras without
+    a controllable light — no Bosch cloud call is made.
 
     When ``prefer_local=True``, attempt the RCP-LAN write path FIRST (skipping
     the Bosch cloud entirely). Maps ``enabled=True`` to brightness 100, ``False``
@@ -408,6 +412,18 @@ async def bosch_camera_light_set(
     br.ensure_cli_importable()
 
     name, cam_info = br._resolve_cam(cameras, camera)
+
+    # Gate: reject cameras without a controllable light before any API call.
+    if not cam_info.get("has_light", False):
+        model = cam_info.get("model", "unknown")
+        raise MCPError(
+            code="hardware_unsupported",
+            detail=(
+                f"Camera '{name}' (model '{model}') has no controllable light hardware. "
+                "Light is only available on Eyes Outdoor II."
+            ),
+            camera=name,
+        )
 
     if prefer_local:
         local_ip = cam_info.get("local_ip", "").strip()

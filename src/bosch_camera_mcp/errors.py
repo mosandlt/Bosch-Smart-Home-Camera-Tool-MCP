@@ -16,6 +16,7 @@ ErrorCode = Literal[
     "permission_denied",
     "reauth_required",
     "local_unavailable",
+    "hardware_unsupported",
 ]
 
 
