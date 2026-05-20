@@ -5,7 +5,7 @@
 > Reuses the proven reverse-engineered API client from the sister
 > [Python CLI tool](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python).
 >
-> **Status:** v1.3.0 — LAN-fallback feature set: `bosch_camera_lan_ping`, `prefer_local` on privacy/light writes, `recommended_action` on maintenance status (11 tools + 3 resources + 2 prompts, stdio/SSE/streamable-HTTP, pipx/uvx-installable)
+> **Status:** v1.3.1 — LAN-fallback writes now use HTTPS + Digest auth (cross-port from HA v12.5.0); previous v1.3.0 used plain HTTP port 80 which Bosch cameras reject. `bosch_camera_lan_ping`, `prefer_local` on privacy/light writes, `recommended_action` on maintenance status (11 tools + 3 resources + 2 prompts, stdio/SSE/streamable-HTTP, pipx/uvx-installable)
 
 [![License][license-shield]](LICENSE)
 [![Project Maintenance][maintenance-shield]][user_profile]
