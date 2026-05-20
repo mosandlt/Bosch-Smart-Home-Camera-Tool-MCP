@@ -260,6 +260,10 @@ uvx bosch-smart-home-camera-mcp --help
 pip install -e .[test]
 ```
 
+> **Maintainers:** PyPI publishing is automated — pushing a `v*.*.*` tag triggers the
+> [publish-pypi workflow](.github/workflows/publish-pypi.yml) via OIDC Trusted Publisher.
+> Do **not** run `twine upload` manually.
+
 ### Add to Claude Code — stdio (local, recommended)
 
 ```bash

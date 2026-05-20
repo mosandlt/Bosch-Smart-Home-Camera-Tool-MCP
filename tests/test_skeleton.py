@@ -29,9 +29,9 @@ from bosch_camera_mcp.server import (
 
 
 class TestVersion:
-    def test_version_is_v1_3_4(self) -> None:
-        """v1.3.4 — LAN-RCP cred-rotation: transparent Digest cred refresh on HTTP 401."""
-        assert __version__ == "1.3.4"
+    def test_version_is_v1_3_5(self) -> None:
+        """v1.3.5 — defusedxml + TOFU cert pinning for self-signed LAN cameras."""
+        assert __version__ == "1.3.5"
 
 
 class TestServerApp:

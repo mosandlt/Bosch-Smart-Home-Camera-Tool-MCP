@@ -21,8 +21,11 @@ the 401 is silently returned as False (original best-effort behaviour).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import socket
+import ssl
 from collections.abc import Callable, Coroutine
 from typing import Any, Optional
 
@@ -31,6 +34,72 @@ import httpx
 _LOGGER = logging.getLogger(__name__)
 
 _RCP_TIMEOUT: float = 5.0
+
+_CFG_KEY = "cam_cert_fingerprints"
+
+
+class CertPinningError(Exception):
+    """Raised when a camera's live TLS certificate does not match the stored fingerprint.
+
+    Indicates cert rotation (run cert-reset) or a potential MITM attack.
+    """
+
+
+def _fetch_fingerprint_sync(host: str, port: int = 443, timeout: float = 3.0) -> str:
+    """Synchronous TLS connect to obtain the SHA-256 certificate fingerprint.
+
+    Used before async httpx calls so we can verify the cert before sending
+    any application data.  Does not verify CA chain — cameras are self-signed.
+    """
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    try:
+        with socket.create_connection((host, port), timeout=timeout) as raw:
+            with ctx.wrap_socket(raw, server_hostname=host) as tls:
+                der: bytes = tls.getpeercert(binary_form=True)
+                if not der:
+                    raise CertPinningError(f"No certificate from {host}:{port}")
+                return hashlib.sha256(der).hexdigest()
+    except CertPinningError:
+        raise
+    except Exception as exc:
+        raise CertPinningError(f"Cannot fetch cert from {host}:{port}: {exc}") from exc
+
+
+def pin_or_verify_cam(
+    host: str,
+    cfg: Optional[dict[str, Any]],
+    port: int = 443,
+    timeout: float = 3.0,
+) -> None:
+    """TOFU fingerprint check for a LAN camera.
+
+    First call for a host: stores the SHA-256 fingerprint in ``cfg[_CFG_KEY][host]``.
+    Subsequent calls: compare live fingerprint to stored one; raise CertPinningError
+    on mismatch.  When ``cfg`` is None, logs a warning and allows the call (legacy
+    verify=False behaviour).
+
+    Side-effect: mutates ``cfg`` in-memory when a new fingerprint is stored.
+    Caller must persist cfg to disk after the call if desired.
+    """
+    if cfg is None:
+        _LOGGER.warning("lan_rcp: no cfg passed for %s:%d — skipping fingerprint check", host, port)
+        return
+
+    stored: dict[str, str] = cfg.setdefault(_CFG_KEY, {})
+    live_fp = _fetch_fingerprint_sync(host, port, timeout)
+
+    if host not in stored:
+        stored[host] = live_fp
+        _LOGGER.info("lan_rcp: stored new fingerprint for %s — %s…", host, live_fp[:16])
+        return
+
+    if stored[host] != live_fp:
+        raise CertPinningError(
+            f"Certificate fingerprint mismatch for {host}:{port}!\n"
+            f"  Stored: {stored[host]}\n  Live:   {live_fp}"
+        )
 
 # Type alias for the optional credential-rotation callback.
 # Signature: async () -> tuple[str, str] | None
@@ -48,6 +117,7 @@ async def rcp_local_write(
     user: Optional[str] = None,
     password: Optional[str] = None,
     on_401: _On401Callback = None,
+    cfg: Optional[dict[str, Any]] = None,
 ) -> bool:
     """Write an RCP value directly to the camera's LAN HTTPS endpoint.
 
@@ -61,6 +131,11 @@ async def rcp_local_write(
     The write is then retried once with the new credentials.  If ``on_401`` is
     absent, raises, or returns None, the 401 is returned as False immediately.
     Cap: max 1 retry per call (no infinite loop).
+
+    TOFU fingerprint pinning: when ``cfg`` is provided, the camera's SHA-256
+    cert fingerprint is stored on first contact and verified on subsequent calls.
+    Pass the loaded bosch_config.json dict; caller must persist it to disk.
+    Without ``cfg`` the call degrades to verify=False (legacy behaviour).
 
     Returns True on success.  ``payload_hex`` may start with ``"0x"`` or not.
     Some commands require ``num=1`` (e.g. T_WORD-typed writes like 0x0c22 LED
@@ -79,6 +154,12 @@ async def rcp_local_write(
     if num:
         params["num"] = str(num)
 
+    # TOFU: verify fingerprint before sending any application data
+    try:
+        pin_or_verify_cam(cam_ip, cfg)
+    except CertPinningError:
+        raise
+
     current_user: Optional[str] = user
     current_password: Optional[str] = password
 
@@ -89,7 +170,7 @@ async def rcp_local_write(
             else None
         )
         try:
-            async with httpx.AsyncClient(verify=False, timeout=_RCP_TIMEOUT, auth=auth) as client:  # noqa: S501
+            async with httpx.AsyncClient(verify=False, timeout=_RCP_TIMEOUT, auth=auth) as client:  # noqa: S501 — CA skipped; fingerprint pinned above
                 resp = await client.get(base, params=params)
                 if resp.status_code == 200:
                     if b"<err>" in resp.content.lower():
