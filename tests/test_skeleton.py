@@ -29,9 +29,9 @@ from bosch_camera_mcp.server import (
 
 
 class TestVersion:
-    def test_version_is_v1_3_0(self) -> None:
-        """v1.3.0 — LAN-fallback feature set."""
-        assert __version__ == "1.3.0"
+    def test_version_is_v1_3_1(self) -> None:
+        """v1.3.1 — LAN RCP HTTPS+Digest auth fix."""
+        assert __version__ == "1.3.1"
 
 
 class TestServerApp:

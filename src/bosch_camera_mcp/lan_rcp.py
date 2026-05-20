@@ -4,14 +4,17 @@ Ported from the HA integration's rcp.py (rcp_local_write / rcp_local_write_priva
 rcp_local_write_front_light).  Uses httpx.AsyncClient so the MCP server stays on its
 existing async I/O stack (no aiohttp / no requests).
 
-Protocol: unauthenticated HTTP GET to http://<cam_ip>/rcp.xml with WRITE direction.
-Works on Gen2 cameras (HOME_Eyes_Outdoor, HOME_Eyes_Indoor) from at least FW 9.40.25.
+Protocol: HTTPS GET to https://<cam_ip>/rcp.xml with HTTP Digest auth (WRITE direction).
+Gen2 cameras (HOME_Eyes_Outdoor, HOME_Eyes_Indoor, FW 9.40.25+) only accept HTTPS on
+port 443 and require Digest auth — plain HTTP on port 80 returns connection refused.
+Confirmed against live Gen2 hardware 2026-05-20.
 Best-effort — a False return means the caller must fall back to the cloud API.
 """
 
 from __future__ import annotations
 
 import logging
+from typing import Optional
 
 import httpx
 
@@ -26,15 +29,23 @@ async def rcp_local_write(
     payload_hex: str,
     type_: str = "P_OCTET",
     num: int = 0,
+    *,
+    user: Optional[str] = None,
+    password: Optional[str] = None,
 ) -> bool:
-    """Write an RCP value directly to the camera's LAN HTTP endpoint.
+    """Write an RCP value directly to the camera's LAN HTTPS endpoint.
+
+    Bosch SHC Gen2 cameras listen on HTTPS port 443 only (no plain HTTP) and
+    require HTTP Digest auth on rcp.xml. Pass ``user`` + ``password`` from the
+    camera's local_username / local_password fields in bosch_config.json so the
+    write authorises. Without credentials the camera returns HTTP 401.
 
     Returns True on success.  ``payload_hex`` may start with ``"0x"`` or not.
     Some commands require ``num=1`` (e.g. T_WORD-typed writes like 0x0c22 LED
     dimmer); the default 0 keeps backward compatibility.
     Best-effort: any network / protocol error returns False.
     """
-    base = f"http://{cam_ip}/rcp.xml"
+    base = f"https://{cam_ip}/rcp.xml"
     if not payload_hex.lower().startswith("0x"):
         payload_hex = "0x" + payload_hex
     params: dict[str, str] = {
@@ -45,12 +56,13 @@ async def rcp_local_write(
     }
     if num:
         params["num"] = str(num)
+    auth = httpx.DigestAuth(user, password) if (user and password) else None
     try:
-        async with httpx.AsyncClient(verify=False, timeout=_RCP_TIMEOUT) as client:  # noqa: S501
+        async with httpx.AsyncClient(verify=False, timeout=_RCP_TIMEOUT, auth=auth) as client:  # noqa: S501
             resp = await client.get(base, params=params)
             if resp.status_code != 200:
                 _LOGGER.debug(
-                    "rcp_local_write: %s@%s HTTP %d", command, cam_ip, resp.status_code
+                    "rcp_local_write: %s@%s HTTPS %d", command, cam_ip, resp.status_code
                 )
                 return False
             if b"<err>" in resp.content.lower():
@@ -62,32 +74,45 @@ async def rcp_local_write(
     return False
 
 
-async def rcp_local_write_privacy(cam_ip: str, enabled: bool) -> bool:
-    """Write privacy-mode state via direct LOCAL RCP (Gen2, no auth).
+async def rcp_local_write_privacy(
+    cam_ip: str,
+    enabled: bool,
+    *,
+    user: Optional[str] = None,
+    password: Optional[str] = None,
+) -> bool:
+    """Write privacy-mode state via direct LOCAL RCP (Gen2 HTTPS + Digest auth).
 
     Best-effort fallback used when the cloud API is unreachable or the caller
-    has ``prefer_local=True``.  Returns False when the camera rejects the write
-    or is not reachable.
+    has ``prefer_local=True``.  Pass ``user`` + ``password`` from the camera's
+    local credentials so the Digest challenge is answered.  Returns False when
+    the camera rejects the write or is not reachable.
 
     RCP command 0x0d00 (privacy mask): 4-byte payload where byte[1] carries the
     mode (0x01 = ON, 0x00 = OFF).
     """
     payload = "00010000" if enabled else "00000000"
-    return await rcp_local_write(cam_ip, "0x0d00", payload, "P_OCTET")
+    return await rcp_local_write(cam_ip, "0x0d00", payload, "P_OCTET", user=user, password=password)
 
 
-async def rcp_local_write_front_light(cam_ip: str, brightness: int) -> bool:
-    """Write front-light brightness via direct LOCAL RCP (Gen2, no auth).
+async def rcp_local_write_front_light(
+    cam_ip: str,
+    brightness: int,
+    *,
+    user: Optional[str] = None,
+    password: Optional[str] = None,
+) -> bool:
+    """Write front-light brightness via direct LOCAL RCP (Gen2 HTTPS + Digest auth).
 
     ``brightness`` is 0-100 (0 = off).  Maps to RCP 0x0c22 (LED dimmer,
-    T_WORD, num=1).  Best-effort; not every Gen2 firmware accepts
-    unauthenticated writes — False return means the caller must use the cloud.
+    T_WORD, num=1).  Pass ``user`` + ``password`` from the camera's local
+    credentials so the Digest challenge is answered.
     Wallwasher RGB is still cloud-only (write payload too complex for the
-    unauthenticated RCP path).
+    local RCP path).  Best-effort: False return means the caller must use cloud.
     """
     val = max(0, min(100, int(brightness)))
     payload = f"{val:04x}"
-    return await rcp_local_write(cam_ip, "0x0c22", payload, "T_WORD", num=1)
+    return await rcp_local_write(cam_ip, "0x0c22", payload, "T_WORD", num=1, user=user, password=password)
 
 
 async def lan_tcp_ping(ip: str, port: int = 443, timeout: float = 1.5) -> tuple[bool, float]:

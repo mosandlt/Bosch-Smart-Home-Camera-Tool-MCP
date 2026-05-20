@@ -8,4 +8,4 @@ Status: v1.1.0 — LAN-only media (privacy hardened). Snapshot + stream_url
 go directly to camera over LAN; no Bosch cloud roundtrip for media.
 """
 
-__version__ = "1.3.0"
+__version__ = "1.3.1"

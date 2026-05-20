@@ -1,4 +1,4 @@
-"""MCP server entrypoint — v1.3.0.
+"""MCP server entrypoint — v1.3.1.
 
 All 8 tool bodies are now wired to the sister CLI's bosch_camera.py via
 bosch_camera_mcp.adapters.cli_bridge (Option C: sys.path injection).
@@ -371,7 +371,9 @@ async def bosch_camera_privacy_set(
         if local_ip:
             from .lan_rcp import rcp_local_write_privacy  # noqa: PLC0415
 
-            ok = await rcp_local_write_privacy(local_ip, enabled)
+            local_user = cam_info.get("local_username", "").strip() or None
+            local_pass = cam_info.get("local_password", "").strip() or None
+            ok = await rcp_local_write_privacy(local_ip, enabled, user=local_user, password=local_pass)
             if ok:
                 logger.info(
                     "privacy_set(%s, %s): succeeded via LOCAL RCP (%s)", name, enabled, local_ip
@@ -412,8 +414,10 @@ async def bosch_camera_light_set(
         if local_ip:
             from .lan_rcp import rcp_local_write_front_light  # noqa: PLC0415
 
+            local_user = cam_info.get("local_username", "").strip() or None
+            local_pass = cam_info.get("local_password", "").strip() or None
             brightness = 100 if enabled else 0
-            ok = await rcp_local_write_front_light(local_ip, brightness)
+            ok = await rcp_local_write_front_light(local_ip, brightness, user=local_user, password=local_pass)
             if ok:
                 logger.info(
                     "light_set(%s, %s): succeeded via LOCAL RCP (%s)", name, enabled, local_ip
