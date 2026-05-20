@@ -29,9 +29,9 @@ from bosch_camera_mcp.server import (
 
 
 class TestVersion:
-    def test_version_is_v1_3_2(self) -> None:
-        """v1.3.2 — featureSupport.light gate in bosch_camera_light_set."""
-        assert __version__ == "1.3.2"
+    def test_version_is_v1_3_3(self) -> None:
+        """v1.3.3 — audio/intrusion/wifi tools added."""
+        assert __version__ == "1.3.3"
 
 
 class TestServerApp:

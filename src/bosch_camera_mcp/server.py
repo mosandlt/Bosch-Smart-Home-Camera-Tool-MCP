@@ -1,4 +1,4 @@
-"""MCP server entrypoint — v1.3.2.
+"""MCP server entrypoint — v1.3.3.
 
 All 8 tool bodies are now wired to the sister CLI's bosch_camera.py via
 bosch_camera_mcp.adapters.cli_bridge (Option C: sys.path injection).
@@ -84,6 +84,49 @@ class LanPingResult(BaseModel):
     ip: str = Field(description="IP address that was probed")
     latency_ms: float = Field(
         description="Round-trip latency in milliseconds, or -1.0 if unreachable"
+    )
+
+
+class AudioSettings(BaseModel):
+    """Microphone + speaker levels returned by bosch_camera_audio_get."""
+
+    microphone_level: Optional[int] = Field(
+        default=None, description="Microphone recording level (0-100)"
+    )
+    speaker_level: Optional[int] = Field(
+        default=None, description="Speaker / intercom playback volume (0-100)"
+    )
+    intercom_enabled: Optional[bool] = Field(
+        default=None,
+        description="Two-way intercom enabled flag (Gen2 Indoor II only; None for cameras without intercom)",
+    )
+
+
+class IntrusionConfig(BaseModel):
+    """Intrusion detection configuration returned by bosch_camera_intrusion_get."""
+
+    mode: Optional[str] = Field(
+        default=None,
+        description="Detection mode, e.g. OFF | ACTIVE | SCHEDULED",
+    )
+    sensitivity: Optional[int] = Field(
+        default=None, description="Detection sensitivity (0-7; 0=low, 7=high)"
+    )
+    distance: Optional[int] = Field(
+        default=None, description="Detection distance in meters (1-10)"
+    )
+
+
+class WifiInfo(BaseModel):
+    """WiFi signal information returned by bosch_camera_wifi."""
+
+    rssi: Optional[int] = Field(
+        default=None, description="Raw RSSI in dBm (negative; e.g. -67)"
+    )
+    ssid: Optional[str] = Field(default=None, description="Connected WiFi SSID")
+    signal_strength: Optional[int] = Field(
+        default=None,
+        description="Signal quality 0-100 % derived from RSSI (-50 dBm = 100 %, -100 dBm = 0 %)",
     )
 
 
@@ -509,6 +552,244 @@ async def bosch_camera_maintenance_status() -> dict[str, Any]:
     else:
         result["recommended_action"] = None
     return result
+
+
+@mcp.tool()
+def bosch_camera_audio_get(camera: str) -> AudioSettings:
+    """Get the microphone and speaker level settings for one Gen2 camera.
+
+    Only for cameras with ``featureSupport.sound=true`` (Gen2 Indoor II and
+    Gen2 Outdoor II).  Raises ``hardware_unsupported`` immediately for Gen1
+    cameras or Gen2 cameras without audio hardware.
+
+    Returns ``{microphone_level, speaker_level, intercom_enabled}``.
+    ``intercom_enabled`` is ``None`` for cameras without a two-way intercom
+    (e.g. Outdoor II).
+    """
+    br = _bridge()
+    cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+
+    if not cam_info.get("has_sound", False):
+        model = cam_info.get("model", "unknown")
+        raise MCPError(
+            code="hardware_unsupported",
+            detail=(
+                f"Camera '{name}' (model '{model}') has no audio hardware. "
+                "Audio settings are only available on Gen2 cameras (has_sound=true in config)."
+            ),
+            camera=name,
+        )
+
+    raw = br.get_audio(session, cam_info["id"])
+    mic: Optional[int] = raw.get("microphoneLevel")
+    spk_raw = raw.get("SpeakerLevel") or raw.get("speakerLevel")
+    spk: Optional[int] = int(spk_raw) if spk_raw is not None else None
+    intercom_raw = raw.get("intercomEnabled")
+    intercom: Optional[bool] = bool(intercom_raw) if intercom_raw is not None else None
+    return AudioSettings(
+        microphone_level=mic,
+        speaker_level=spk,
+        intercom_enabled=intercom,
+    )
+
+
+@mcp.tool()
+def bosch_camera_audio_set(
+    camera: str,
+    mic_level: Optional[int] = None,
+    speaker_level: Optional[int] = None,
+) -> AudioSettings:
+    """Set the microphone level and/or speaker level for one Gen2 camera.
+
+    Only for cameras with ``featureSupport.sound=true`` (Gen2 Indoor II and
+    Gen2 Outdoor II).  Raises ``hardware_unsupported`` for cameras without audio
+    hardware.  At least one of ``mic_level`` or ``speaker_level`` must be provided.
+
+    Both values must be in the range 0-100.  The API persists the full audio
+    payload — unspecified fields are preserved from the current camera state.
+
+    Returns updated ``{microphone_level, speaker_level, intercom_enabled}`` after write.
+    """
+    br = _bridge()
+    cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+
+    if not cam_info.get("has_sound", False):
+        model = cam_info.get("model", "unknown")
+        raise MCPError(
+            code="hardware_unsupported",
+            detail=(
+                f"Camera '{name}' (model '{model}') has no audio hardware. "
+                "Audio settings are only available on Gen2 cameras (has_sound=true in config)."
+            ),
+            camera=name,
+        )
+
+    if mic_level is None and speaker_level is None:
+        raise MCPError(
+            code="permission_denied",
+            detail="At least one of mic_level or speaker_level must be provided.",
+            camera=name,
+        )
+
+    for label, val in (("mic_level", mic_level), ("speaker_level", speaker_level)):
+        if val is not None and not (0 <= val <= 100):
+            raise MCPError(
+                code="permission_denied",
+                detail=f"{label}={val} is out of range. Must be 0-100.",
+                camera=name,
+            )
+
+    br.set_audio(session, cam_info["id"], mic_level=mic_level, speaker_level=speaker_level)
+    # Re-fetch to return updated values
+    raw = br.get_audio(session, cam_info["id"])
+    mic: Optional[int] = raw.get("microphoneLevel")
+    spk_raw = raw.get("SpeakerLevel") or raw.get("speakerLevel")
+    spk: Optional[int] = int(spk_raw) if spk_raw is not None else None
+    intercom_raw = raw.get("intercomEnabled")
+    intercom: Optional[bool] = bool(intercom_raw) if intercom_raw is not None else None
+    return AudioSettings(
+        microphone_level=mic,
+        speaker_level=spk,
+        intercom_enabled=intercom,
+    )
+
+
+@mcp.tool()
+def bosch_camera_intrusion_get(camera: str) -> IntrusionConfig:
+    """Get the intrusion detection configuration for one Gen2 camera.
+
+    Returns ``{mode, sensitivity, distance}``.  Only available on Gen2 cameras
+    (``has_sound=true`` in config is reused as the Gen2 gate; intrusion detection
+    is a Gen2-only feature).  Raises ``hardware_unsupported`` for Gen1 cameras.
+
+    ``mode``: detection activation mode (e.g. ``OFF`` | ``ACTIVE`` | ``SCHEDULED``).
+    ``sensitivity``: 0 (low) to 7 (high) — confirmed range FW 9.40+.
+    ``distance``: detection range in meters, 1-10.
+    """
+    br = _bridge()
+    cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+
+    if not cam_info.get("has_sound", False):
+        model = cam_info.get("model", "unknown")
+        raise MCPError(
+            code="hardware_unsupported",
+            detail=(
+                f"Camera '{name}' (model '{model}') does not support intrusion detection. "
+                "This feature is only available on Gen2 cameras."
+            ),
+            camera=name,
+        )
+
+    raw = br.get_intrusion_config(session, cam_info["id"])
+    return IntrusionConfig(
+        mode=raw.get("mode"),
+        sensitivity=raw.get("sensitivity"),
+        distance=raw.get("distance"),
+    )
+
+
+@mcp.tool()
+def bosch_camera_intrusion_set(
+    camera: str,
+    mode: Optional[str] = None,
+    sensitivity: Optional[int] = None,
+    distance: Optional[int] = None,
+) -> IntrusionConfig:
+    """Update the intrusion detection configuration for one Gen2 camera.
+
+    Gen2-only feature — raises ``hardware_unsupported`` for Gen1 cameras.
+    At least one parameter must be provided.
+
+    ``mode``: ``OFF`` | ``ACTIVE`` | ``SCHEDULED``.
+    ``sensitivity``: 0-7 (0 = low, 7 = high; FW 9.40+ confirmed range).
+    ``distance``: detection range in meters, 1-10.
+
+    Unspecified fields are preserved from the current camera configuration.
+    Returns the updated ``{mode, sensitivity, distance}`` after write.
+    """
+    br = _bridge()
+    cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+
+    if not cam_info.get("has_sound", False):
+        model = cam_info.get("model", "unknown")
+        raise MCPError(
+            code="hardware_unsupported",
+            detail=(
+                f"Camera '{name}' (model '{model}') does not support intrusion detection. "
+                "This feature is only available on Gen2 cameras."
+            ),
+            camera=name,
+        )
+
+    if mode is None and sensitivity is None and distance is None:
+        raise MCPError(
+            code="permission_denied",
+            detail="At least one of mode, sensitivity, or distance must be provided.",
+            camera=name,
+        )
+
+    if sensitivity is not None and not (0 <= sensitivity <= 7):
+        raise MCPError(
+            code="permission_denied",
+            detail=f"sensitivity={sensitivity} is out of range. Must be 0-7.",
+            camera=name,
+        )
+    if distance is not None and not (1 <= distance <= 10):
+        raise MCPError(
+            code="permission_denied",
+            detail=f"distance={distance} is out of range. Must be 1-10.",
+            camera=name,
+        )
+
+    br.set_intrusion_config(
+        session, cam_info["id"], mode=mode, sensitivity=sensitivity, distance=distance
+    )
+    raw = br.get_intrusion_config(session, cam_info["id"])
+    return IntrusionConfig(
+        mode=raw.get("mode"),
+        sensitivity=raw.get("sensitivity"),
+        distance=raw.get("distance"),
+    )
+
+
+@mcp.tool()
+def bosch_camera_wifi(camera: str) -> WifiInfo:
+    """Get the WiFi signal quality for one camera.
+
+    Queries ``GET /v11/video_inputs/{id}/wifiinfo`` and returns
+    ``{rssi, ssid, signal_strength}``.
+
+    ``rssi``: raw RSSI in dBm (negative integer, e.g. ``-67``).
+    ``ssid``: the connected WiFi network name.
+    ``signal_strength``: 0-100 % quality derived from RSSI
+    (``-50 dBm = 100 %``, ``-100 dBm = 0 %``).
+
+    Useful for diagnosing intermittent connectivity, stream drops, or deciding
+    whether to force ``prefer_local=True`` on privacy/light writes.
+    """
+    br = _bridge()
+    cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    raw = br.get_wifi_info(session, cam_info["id"])
+    rssi_raw = raw.get("rssi") or raw.get("signalStrength")
+    rssi: Optional[int] = int(rssi_raw) if rssi_raw is not None else None
+    ssid: Optional[str] = raw.get("ssid") or raw.get("networkName")
+    strength: Optional[int] = raw.get("signal_strength")
+    return WifiInfo(rssi=rssi, ssid=ssid, signal_strength=strength)
 
 
 # ── Register resources + prompts ──────────────────────────────────────────────

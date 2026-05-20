@@ -5,7 +5,7 @@
 > Reuses the proven reverse-engineered API client from the sister
 > [Python CLI tool](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python).
 >
-> **Status:** v1.3.1 — LAN-fallback writes now use HTTPS + Digest auth (cross-port from HA v12.5.0); previous v1.3.0 used plain HTTP port 80 which Bosch cameras reject. `bosch_camera_lan_ping`, `prefer_local` on privacy/light writes, `recommended_action` on maintenance status (11 tools + 3 resources + 2 prompts, stdio/SSE/streamable-HTTP, pipx/uvx-installable)
+> **Status:** v1.3.3 — audio get/set, intrusion detection get/set, WiFi info (cross-port from HA v12.6.0). 16 tools + 3 resources + 2 prompts, stdio/SSE/streamable-HTTP, pipx/uvx-installable
 
 [![License][license-shield]](LICENSE)
 [![Project Maintenance][maintenance-shield]][user_profile]
@@ -46,7 +46,7 @@ The Bosch Smart Home Camera reverse-engineered API is exposed via four sibling p
 
 | Feature | [Home Assistant Integration](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | [Python CLI Tool](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | [ioBroker Adapter](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | [MCP Server](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) |
 |---|---|---|---|---|
-| **Maturity** | v12+ — HA Quality Scale **Platinum** | v10.7+ stable | v0.7+ beta | v1.3+ stable · PyPI |
+| **Maturity** | v12+ — HA Quality Scale **Platinum** | v10.7+ stable | v0.7+ beta | v1.3.3 stable · PyPI |
 | **Platform** | Home Assistant (HACS) | Standalone Python 3.10+ CLI | ioBroker (npm) | Python 3.10+ · pipx / uvx · stdio + streamable-HTTP for MCP clients (Claude Desktop, Claude Code, custom) |
 | **Login** | OAuth2 PKCE (browser) | OAuth2 PKCE (browser) | OAuth2 PKCE (browser) | OAuth2 PKCE (browser, one-time) |
 | **Snapshots** | ✅ Native `Camera.image` | ✅ `snapshot` command | ✅ File-store + base64 DP | ✅ `bosch_camera_snapshot` (LAN-only) |
@@ -136,7 +136,7 @@ sequenceDiagram
     Tool-->>Agent: {reachable: true, ip: "...", latency_ms: 12}
 ```
 
-## Planned MCP tools (v0.1.0)
+## MCP tools (16 total, v1.3.3)
 
 | Tool | Description | Returns |
 |---|---|---|
@@ -149,9 +149,13 @@ sequenceDiagram
 | `bosch_camera_light_set` | Turn spotlight on/off; `prefer_local=True` routes to LAN RCP first | `{name, status, light_on, ...}` |
 | `bosch_camera_pan` | Pan the 360° camera | `{camera, position}` |
 | `bosch_camera_notifications_set` | Toggle push notifications | `{camera, notifications_on}` |
-| `bosch_camera_info` | Verbose camera info (firmware, IP, stream URLs) | full dict |
 | `bosch_camera_lan_ping` | TCP-probe a camera on LAN port 443 (1.5 s timeout) | `{reachable, ip, latency_ms}` |
-| `bosch_camera_maintenance_status` | Fetch current cloud maintenance announcement from community RSS feed | `{state, title, link, pub_date, summary, scheduled_start, scheduled_end, source, camera_relevant, recommended_action}` |
+| `bosch_camera_maintenance_status` | Fetch current cloud maintenance announcement from community RSS feed | `{state, title, link, pub_date, summary, …, recommended_action}` |
+| `bosch_camera_audio_get` | Get microphone level, speaker level, intercom flag (Gen2 only) | `{microphone_level, speaker_level, intercom_enabled}` |
+| `bosch_camera_audio_set` | Set microphone level and/or speaker level 0-100 (Gen2 only) | `{microphone_level, speaker_level, intercom_enabled}` |
+| `bosch_camera_intrusion_get` | Get intrusion detection config: mode, sensitivity 0-7, distance 1-10 m (Gen2 only) | `{mode, sensitivity, distance}` |
+| `bosch_camera_intrusion_set` | Update intrusion detection mode/sensitivity/distance (Gen2 only) | `{mode, sensitivity, distance}` |
+| `bosch_camera_wifi` | Get WiFi RSSI, SSID, and derived signal quality 0-100 % | `{rssi, ssid, signal_strength}` |
 
 Tools intentionally NOT exposed to LLMs (write-risky / time-consuming):
 - Live RTSP stream URLs (no LLM use case)

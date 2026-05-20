@@ -344,6 +344,125 @@ def set_notifications(
     return False
 
 
+def get_audio(session: requests.Session, cam_id: str) -> dict:
+    """GET /v11/video_inputs/{cam_id}/audio → {microphoneLevel, speakerLevel, ...}.
+
+    Returns the raw JSON dict from the API.
+    Endpoint documented from HA v12.6.0 coordinator._audio_cache.
+    """
+    r = session.get(
+        f"{CLOUD_API}/v11/video_inputs/{cam_id}/audio",
+        timeout=10,
+    )
+    if r.status_code == 200:
+        return dict(r.json())
+    _raise_api_error(r, f"get_audio({cam_id})")
+    return {}  # unreachable
+
+
+def set_audio(
+    session: requests.Session,
+    cam_id: str,
+    mic_level: Optional[int] = None,
+    speaker_level: Optional[int] = None,
+) -> bool:
+    """PUT /v11/video_inputs/{cam_id}/audio — update mic/speaker levels.
+
+    Fetches current audio state first, merges the requested fields, then
+    sends the full body (API requires complete payload).
+    mic_level and speaker_level must be in range 0-100.
+    Extracted from HA v12.6.0 BoschMicrophoneLevelNumber + BoschSpeakerLevelNumber.
+    """
+    # Fetch current state so we can preserve unmodified fields
+    current = get_audio(session, cam_id)
+    if mic_level is not None:
+        current["microphoneLevel"] = mic_level
+    if speaker_level is not None:
+        current["SpeakerLevel"] = speaker_level
+    r = session.put(
+        f"{CLOUD_API}/v11/video_inputs/{cam_id}/audio",
+        json=current,
+        headers={"Content-Type": "application/json"},
+        timeout=10,
+    )
+    if r.status_code in (200, 201, 204):
+        return True
+    _raise_api_error(r, f"set_audio({cam_id})")
+    return False  # unreachable
+
+
+def get_intrusion_config(session: requests.Session, cam_id: str) -> dict:
+    """GET /v11/video_inputs/{cam_id}/intrusionDetectionConfig.
+
+    Returns raw JSON dict with at least {mode, sensitivity, distance}.
+    Endpoint documented from HA v12.6.0 coordinator._intrusion_config_cache.
+    """
+    r = session.get(
+        f"{CLOUD_API}/v11/video_inputs/{cam_id}/intrusionDetectionConfig",
+        timeout=10,
+    )
+    if r.status_code == 200:
+        return dict(r.json())
+    _raise_api_error(r, f"get_intrusion_config({cam_id})")
+    return {}  # unreachable
+
+
+def set_intrusion_config(
+    session: requests.Session,
+    cam_id: str,
+    mode: Optional[str] = None,
+    sensitivity: Optional[int] = None,
+    distance: Optional[int] = None,
+) -> bool:
+    """PUT /v11/video_inputs/{cam_id}/intrusionDetectionConfig — partial update.
+
+    Fetches current config first, merges requested fields, then PUT full body.
+    sensitivity: 0-7 (HA v12.6.0 FW 9.40+ confirmed range).
+    distance: 1-10 (iOS app slider range, capture 2026-04-28).
+    Extracted from HA v12.6.0 BoschIntrusionSensitivityNumber.
+    """
+    current = get_intrusion_config(session, cam_id)
+    if mode is not None:
+        current["mode"] = mode
+    if sensitivity is not None:
+        current["sensitivity"] = sensitivity
+    if distance is not None:
+        current["distance"] = distance
+    r = session.put(
+        f"{CLOUD_API}/v11/video_inputs/{cam_id}/intrusionDetectionConfig",
+        json=current,
+        headers={"Content-Type": "application/json"},
+        timeout=10,
+    )
+    if r.status_code in (200, 201, 204):
+        return True
+    _raise_api_error(r, f"set_intrusion_config({cam_id})")
+    return False  # unreachable
+
+
+def get_wifi_info(session: requests.Session, cam_id: str) -> dict:
+    """GET /v11/video_inputs/{cam_id}/wifiinfo.
+
+    Returns {rssi, ssid, ...} with a synthesised signal_strength (0-100).
+    RSSI → signal_strength mapping: rssi >= -50 → 100, <= -100 → 0, linear in between.
+    Endpoint documented from HA v12.6.0 coordinator._wifiinfo_cache.
+    """
+    r = session.get(
+        f"{CLOUD_API}/v11/video_inputs/{cam_id}/wifiinfo",
+        timeout=10,
+    )
+    if r.status_code == 200:
+        data = dict(r.json())
+        rssi: Optional[int] = data.get("rssi") or data.get("signalStrength")
+        if rssi is not None:
+            # Map RSSI dBm to 0-100% signal quality
+            clamped = max(-100, min(-50, int(rssi)))
+            data["signal_strength"] = int(round((clamped + 100) * 2))
+        return data
+    _raise_api_error(r, f"get_wifi_info({cam_id})")
+    return {}  # unreachable
+
+
 def _raise_api_error(resp: requests.Response, context: str) -> None:
     """Translate a non-success HTTP response to an MCPError."""
     from bosch_camera_mcp.errors import MCPError
