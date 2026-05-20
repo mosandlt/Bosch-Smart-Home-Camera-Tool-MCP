@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import sys
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, call, patch
 
 import pytest
 
@@ -302,7 +302,7 @@ class TestRcpLocalWritePrivacyCreds:
         assert result is True
         mock_write.assert_awaited_once_with(
             "192.0.2.149", "0x0d00", "00010000", "P_OCTET",
-            user="cbs-testuser", password="testpass456",
+            user="cbs-testuser", password="testpass456", on_401=None,
         )
 
     @pytest.mark.asyncio
@@ -375,7 +375,7 @@ class TestRcpLocalWriteFrontLightCreds:
         assert result is True
         mock_write.assert_awaited_once_with(
             "192.0.2.149", "0x0c22", "0064", "T_WORD", num=1,
-            user="cbs-testuser", password="testpass456",
+            user="cbs-testuser", password="testpass456", on_401=None,
         )
 
     @pytest.mark.asyncio
@@ -445,7 +445,7 @@ class TestServerPassesCredsThroughPreferLocal:
 
         mock_rcp.assert_awaited_once_with(
             "192.0.2.149", True,
-            user="cbs-testuser", password="testpass456",
+            user="cbs-testuser", password="testpass456", on_401=ANY,
         )
 
     @pytest.mark.asyncio
@@ -464,7 +464,7 @@ class TestServerPassesCredsThroughPreferLocal:
 
         mock_rcp.assert_awaited_once_with(
             "192.0.2.149", False,
-            user="cbs-testuser", password="testpass456",
+            user="cbs-testuser", password="testpass456", on_401=ANY,
         )
 
     @pytest.mark.asyncio
@@ -483,7 +483,7 @@ class TestServerPassesCredsThroughPreferLocal:
 
         mock_rcp.assert_awaited_once_with(
             "192.0.2.149", 100,
-            user="cbs-testuser", password="testpass456",
+            user="cbs-testuser", password="testpass456", on_401=ANY,
         )
 
     @pytest.mark.asyncio
@@ -502,7 +502,7 @@ class TestServerPassesCredsThroughPreferLocal:
 
         mock_rcp.assert_awaited_once_with(
             "192.0.2.149", 0,
-            user="cbs-testuser", password="testpass456",
+            user="cbs-testuser", password="testpass456", on_401=ANY,
         )
 
     @pytest.mark.asyncio
@@ -525,5 +525,5 @@ class TestServerPassesCredsThroughPreferLocal:
         # NoCreds has local_ip but empty creds → user=None, password=None
         mock_rcp.assert_awaited_once_with(
             "192.0.2.150", True,
-            user=None, password=None,
+            user=None, password=None, on_401=ANY,
         )

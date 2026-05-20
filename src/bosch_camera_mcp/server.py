@@ -1,4 +1,4 @@
-"""MCP server entrypoint — v1.3.3.
+"""MCP server entrypoint — v1.3.4.
 
 All 8 tool bodies are now wired to the sister CLI's bosch_camera.py via
 bosch_camera_mcp.adapters.cli_bridge (Option C: sys.path injection).
@@ -412,11 +412,26 @@ async def bosch_camera_privacy_set(
     if prefer_local:
         local_ip = cam_info.get("local_ip", "").strip()
         if local_ip:
-            from .lan_rcp import rcp_local_write_privacy  # noqa: PLC0415
+            from .lan_rcp import refresh_local_creds, rcp_local_write_privacy  # noqa: PLC0415
 
             local_user = cam_info.get("local_username", "").strip() or None
             local_pass = cam_info.get("local_password", "").strip() or None
-            ok = await rcp_local_write_privacy(local_ip, enabled, user=local_user, password=local_pass)
+            cam_id = cam_info["id"]
+
+            async def _on_401_privacy() -> Optional[tuple[str, str]]:
+                return await refresh_local_creds(
+                    cam_id=cam_id,
+                    session=session,
+                    cfg=cfg,
+                    cam_name=name,
+                    config_path=_CONFIG_PATH,
+                )
+
+            ok = await rcp_local_write_privacy(
+                local_ip, enabled,
+                user=local_user, password=local_pass,
+                on_401=_on_401_privacy,
+            )
             if ok:
                 logger.info(
                     "privacy_set(%s, %s): succeeded via LOCAL RCP (%s)", name, enabled, local_ip
@@ -471,12 +486,27 @@ async def bosch_camera_light_set(
     if prefer_local:
         local_ip = cam_info.get("local_ip", "").strip()
         if local_ip:
-            from .lan_rcp import rcp_local_write_front_light  # noqa: PLC0415
+            from .lan_rcp import refresh_local_creds, rcp_local_write_front_light  # noqa: PLC0415
 
             local_user = cam_info.get("local_username", "").strip() or None
             local_pass = cam_info.get("local_password", "").strip() or None
+            cam_id = cam_info["id"]
             brightness = 100 if enabled else 0
-            ok = await rcp_local_write_front_light(local_ip, brightness, user=local_user, password=local_pass)
+
+            async def _on_401_light() -> Optional[tuple[str, str]]:
+                return await refresh_local_creds(
+                    cam_id=cam_id,
+                    session=session,
+                    cfg=cfg,
+                    cam_name=name,
+                    config_path=_CONFIG_PATH,
+                )
+
+            ok = await rcp_local_write_front_light(
+                local_ip, brightness,
+                user=local_user, password=local_pass,
+                on_401=_on_401_light,
+            )
             if ok:
                 logger.info(
                     "light_set(%s, %s): succeeded via LOCAL RCP (%s)", name, enabled, local_ip
@@ -494,14 +524,33 @@ async def bosch_camera_light_set(
 
 
 @mcp.tool()
-def bosch_camera_pan(camera: str, direction: str) -> CameraStatus:
-    """Pan the 360° camera. direction: left | center | right | <-120..120>."""
+def bosch_camera_pan(
+    camera: str,
+    direction: str = "home",
+    preset: str | None = None,
+) -> CameraStatus:
+    """Pan the 360° indoor camera (Gen1 CAMERA_360 only, panLimit > 0).
+
+    Named presets (preferred, via ``preset`` parameter):
+      home       →   0° (center)
+      left       → -60°
+      right      → +60°
+      back-left  → -120° (full left limit)
+      back-right → +120° (full right limit)
+
+    ``direction`` accepts the same preset names, legacy aliases (center), or
+    an integer string in the range -panLimit to +panLimit.
+
+    When ``preset`` is set it takes priority over ``direction``.
+    """
     br = _bridge()
     cfg, session, cameras = _get_session()
     br.ensure_cli_importable()
 
     name, cam_info = br._resolve_cam(cameras, camera)
-    br.set_pan(session, cam_info["id"], direction)
+    # preset param overrides direction
+    effective = preset if preset is not None else direction
+    br.set_pan(session, cam_info["id"], effective)
     return _build_status(name, cam_info, session, cfg)
 
 

@@ -263,11 +263,23 @@ def set_light(session: requests.Session, cam_id: str, enabled: bool) -> bool:
     return False
 
 
+# Canonical pan preset angles — shared with Python CLI and ioBroker.
+# home=0° / left=-60° / right=+60° / back-left=-120° / back-right=+120°
+PAN_PRESET_MAP: dict[str, int] = {
+    "home": 0,
+    "left": -60,
+    "right": 60,
+    "back-left": -120,
+    "back-right": 120,
+}
+
+
 def set_pan(session: requests.Session, cam_id: str, direction: str) -> dict:
     """PUT /v11/video_inputs/{cam_id}/pan → move camera to target position.
 
     Args:
-        direction: "left" | "center" | "right" | str(<-120..120>)
+        direction: named preset (home|left|right|back-left|back-right),
+                   legacy alias (center), or str(<-120..120>)
 
     Returns the API response JSON dict.
     Extracted from cmd_pan in bosch_camera.py.
@@ -289,16 +301,22 @@ def set_pan(session: requests.Session, cam_id: str, direction: str) -> dict:
     limit = pan_data.get("panLimit", 120)
 
     direction_lower = direction.strip().lower()
-    preset_map = {"left": -limit, "center": 0, "right": limit}
-    if direction_lower in preset_map:
-        target = preset_map[direction_lower]
+    # Named presets take priority; legacy "center" alias kept for back-compat
+    legacy_map: dict[str, int] = {"center": 0}
+    if direction_lower in PAN_PRESET_MAP:
+        target = PAN_PRESET_MAP[direction_lower]
+    elif direction_lower in legacy_map:
+        target = legacy_map[direction_lower]
     else:
         try:
             target = int(direction)
         except ValueError:
             raise MCPError(
                 code="permission_denied",
-                detail=f"Invalid pan direction {direction!r}. Use left|center|right or an integer in [-120, 120].",
+                detail=(
+                    f"Invalid pan direction {direction!r}. "
+                    "Use home|left|right|back-left|back-right or an integer in [-120, 120]."
+                ),
                 camera=cam_id,
             )
         if not (-limit <= target <= limit):

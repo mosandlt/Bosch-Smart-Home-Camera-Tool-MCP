@@ -1,5 +1,13 @@
 # Changelog — Bosch Smart Home Camera MCP Server
 
+## v1.3.4 (2026-05-20)
+
+**New:** `bosch_camera_pan` — `preset` argument: `"home"` (0°) / `"left"` (-60°) / `"right"` (+60°) / `"back_left"` (-120°) / `"back_right"` (+120°). When `preset` is provided it overrides `angle`. Cross-port from HA v12.6.0 pan preset select entity + Python CLI `pan --preset` flag.
+
+**Fix:** Transparent credential rotation on 401 for LAN-RCP tools (`bosch_camera_privacy_set`, `bosch_camera_light_set`, `bosch_camera_pan` with `prefer_local=True`). On 401 response the tool silently re-fetches Digest credentials from `bosch_config.json` and retries once. No user-visible API change; eliminates cold-start failures when cached Digest nonce has expired.
+
+---
+
 ## v1.3.3 (2026-05-20)
 
 Cross-port of HA v12.6.0 audio/intrusion/WiFi features.

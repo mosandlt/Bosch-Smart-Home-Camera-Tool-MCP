@@ -594,6 +594,8 @@ class TestLightSet:
 class TestPan:
     @resp_lib.activate
     def test_pan_left_calls_correct_endpoint(self, patch_bosch_camera):
+        # v1.3.4: "left" preset now maps to -60° (not -limit=-120°).
+        # PAN_PRESET_MAP canonical: left=-60, back-left=-120.
         resp_lib.add(
             resp_lib.GET,
             f"{CLOUD_API}/v11/video_inputs/{CAM_ID_2}/pan",
@@ -602,7 +604,7 @@ class TestPan:
         resp_lib.add(
             resp_lib.PUT,
             f"{CLOUD_API}/v11/video_inputs/{CAM_ID_2}/pan",
-            json={"currentAbsolutePosition": -120, "estimatedTimeToCompletion": 970},
+            json={"currentAbsolutePosition": -60, "estimatedTimeToCompletion": 970},
         )
 
         from bosch_camera_mcp.adapters.cli_bridge import set_pan
@@ -611,11 +613,11 @@ class TestPan:
 
         s = req_lib.Session()
         result = set_pan(s, CAM_ID_2, "left")
-        assert result["currentAbsolutePosition"] == -120
+        assert result["currentAbsolutePosition"] == -60
 
         put_call = next(c for c in resp_lib.calls if c.request.method == "PUT")
         body = json.loads(put_call.request.body)
-        assert body["absolutePosition"] == -120
+        assert body["absolutePosition"] == -60
 
     @resp_lib.activate
     def test_pan_center_calls_correct_endpoint(self, patch_bosch_camera):

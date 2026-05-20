@@ -273,7 +273,8 @@ class TestPreferLocalPrivacySet:
                 camera="Garten", enabled=True, prefer_local=True
             )
 
-        mock_rcp.assert_awaited_once_with("192.0.2.10", True, user="admin", password="secret123")
+        from unittest.mock import ANY
+        mock_rcp.assert_awaited_once_with("192.0.2.10", True, user="admin", password="secret123", on_401=ANY)
         mock_cloud.assert_not_called()
         assert result is not None
 
@@ -368,7 +369,8 @@ class TestPreferLocalLightSet:
                 camera="Garten", enabled=True, prefer_local=True
             )
 
-        mock_rcp.assert_awaited_once_with("192.0.2.10", 100, user="admin", password="secret123")
+        from unittest.mock import ANY
+        mock_rcp.assert_awaited_once_with("192.0.2.10", 100, user="admin", password="secret123", on_401=ANY)
         mock_cloud.assert_not_called()
 
     @pytest.mark.asyncio
@@ -389,7 +391,8 @@ class TestPreferLocalLightSet:
                 camera="Garten", enabled=False, prefer_local=True
             )
 
-        mock_rcp.assert_awaited_once_with("192.0.2.10", 0, user="admin", password="secret123")
+        from unittest.mock import ANY
+        mock_rcp.assert_awaited_once_with("192.0.2.10", 0, user="admin", password="secret123", on_401=ANY)
         mock_cloud.assert_not_called()
 
     @pytest.mark.asyncio
