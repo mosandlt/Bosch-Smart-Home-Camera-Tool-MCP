@@ -235,7 +235,7 @@ class TestLanPingTimeout:
         with pytest.raises(MCPError) as exc_info:
             await bosch_camera_lan_ping()
 
-        assert exc_info.value.code == "api_unreachable"
+        assert exc_info.value.code == "invalid_argument"
 
     @pytest.mark.asyncio
     async def test_bosch_camera_lan_ping_timeout_unknown_camera_raises(self) -> None:

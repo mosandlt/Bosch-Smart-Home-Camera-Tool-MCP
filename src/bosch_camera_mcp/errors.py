@@ -17,6 +17,7 @@ ErrorCode = Literal[
     "reauth_required",
     "local_unavailable",
     "hardware_unsupported",
+    "invalid_argument",
 ]
 
 

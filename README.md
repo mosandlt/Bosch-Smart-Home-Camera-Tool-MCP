@@ -5,7 +5,7 @@
 > Reuses the proven reverse-engineered API client from the sister
 > [Python CLI tool](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python).
 >
-> **Status:** v1.3.4 — PTZ named presets (`bosch_camera_pan preset=`), transparent cred-rotation on 401. 16 tools + 3 resources + 2 prompts, stdio/SSE/streamable-HTTP, pipx/uvx-installable
+> **Status:** v1.3.6 — 9 bug fixes from live audit 2026-05-24 (camera list always live from cloud, Gen1/Gen2 hw_version, UUID resolution, events field mapping, audio camelCase, intrusion Gen2 gate, error codes, snapshot timestamp). 16 tools + 3 resources + 2 prompts, stdio/SSE/streamable-HTTP, pipx/uvx-installable
 
 [![License][license-shield]](LICENSE)
 [![Project Maintenance][maintenance-shield]][user_profile]
@@ -26,11 +26,11 @@ The sister projects target different runtimes:
 
 | Project | Version | Runtime | User-facing surface |
 |---|---|---|---|
-| [HA Integration](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | v12.7.0 | Home Assistant | UI entities, Lovelace card, automations |
-| [Python CLI](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | v10.7.5 | terminal | `bosch_camera ...` commands |
-| [ioBroker Adapter](https://github.com/mosandlt/iobroker.bosch-smart-home-camera) | v0.7.9 | ioBroker | datapoints, JSON-config admin UI |
+| [HA Integration](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | v12.8.4 | Home Assistant | UI entities, Lovelace card, automations |
+| [Python CLI](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | v10.7.7 | terminal | `bosch_camera ...` commands |
+| [ioBroker Adapter](https://github.com/mosandlt/iobroker.bosch-smart-home-camera) | v0.7.14 | ioBroker | datapoints, JSON-config admin UI |
 | [Node-RED nodes](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-NodeRED) | v0.1.0-alpha | Node-RED | flow nodes for automation pipelines |
-| **MCP Server (this repo)** | **v1.3.4** | **Claude clients** | **MCP tools callable from LLMs** |
+| **MCP Server (this repo)** | **v1.3.6** | **Claude clients** | **MCP tools callable from LLMs** |
 
 LLM use-cases the existing sisters don't cover:
 - "Take a snapshot of the garden camera and describe what you see."
@@ -47,7 +47,7 @@ The Bosch Smart Home Camera reverse-engineered API is exposed via four sibling p
 
 | Feature | [Home Assistant Integration](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | [Python CLI Tool](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | [ioBroker Adapter](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | [MCP Server](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) |
 |---|---|---|---|---|
-| **Maturity** | v12+ — HA Quality Scale **Platinum** | v10.7+ stable | v0.7+ beta | v1.3+ stable · PyPI |
+| **Maturity** | v13.0+ — HA Quality Scale **Platinum** | v10.7+ stable (Mini-NVR BETA) | v0.7+ beta | v1.3+ stable · PyPI |
 | **Platform** | Home Assistant (HACS) | Standalone Python 3.10+ CLI | ioBroker (npm) | Python 3.10+ · pipx / uvx · stdio + streamable-HTTP for MCP clients (Claude Desktop, Claude Code, custom) |
 | **Login** | OAuth2 PKCE (browser) | OAuth2 PKCE (browser) | OAuth2 PKCE (browser) | OAuth2 PKCE (browser, one-time) |
 | **Snapshots** | ✅ Native `Camera.image` | ✅ `snapshot` command | ✅ File-store + base64 DP | ✅ `bosch_camera_snapshot` (LAN-only) |
@@ -58,13 +58,13 @@ The Bosch Smart Home Camera reverse-engineered API is exposed via four sibling p
 | **Privacy mode** | ✅ switch entity | ✅ command | ✅ DP | ✅ `bosch_camera_privacy_set` (LAN-fallback via `prefer_local`) |
 | **Front spotlight (Gen1/Gen2)** | ✅ light entity | ✅ command | ✅ DP | ✅ `bosch_camera_light_set` (LAN-fallback) |
 | **RGB wallwasher (Gen2 Outdoor II)** | ✅ light w/ RGB | ✅ command | ✅ color + brightness DPs | ❌ *(on/off only — RGB not exposed)* |
-| **Panic-alarm siren (Gen2)** | ✅ button entity | ✅ command | ✅ DP | ❌ *(intentionally not exposed)* |
+| **Panic-alarm siren** | ✅ button entity *(Gen2 Indoor II)* | ✅ command *(Gen1 360° only)* | ✅ DP | ❌ *(intentionally not exposed)* |
 | **Image rotation 180°** | ✅ switch | ✅ flag | ✅ DP | ❌ |
 | **Motion / person / audio events** | ✅ FCM push + polling fallback | ✅ event-watch command | ✅ FCM push + polling fallback | ✅ `bosch_camera_events` (on-demand pull) |
 | **Motion edge-trigger state** | ✅ `binary_sensor.motion` | n/a | ✅ `motion_active` DP *(v0.5.3)* | n/a *(request-response, no subscription)* |
 | **Auto-snapshot on motion** | ✅ refreshes Camera entity | n/a | ✅ writes `last_event_image` base64 *(v0.5.3)* | n/a *(no background loop)* |
 | **Synthetic motion trigger (external sensor)** | ✅ service | n/a | ✅ DP | ❌ |
-| **Cloud clip download (history ~30 d)** | ✅ via Media Browser | ✅ download command | ❌ *(parked — no community request yet)* | ❌ *(intentionally not exposed — large payloads)* |
+| **Cloud clip download (history ~30 d)** | ✅ via Media Browser | ❌ | ❌ *(parked — no community request yet)* | ❌ *(intentionally not exposed — large payloads)* |
 | **Mini-NVR (motion-triggered local recording)** | ✅ *(v11.2.0 BETA)* | ✅ *(v10.7.0 BETA)* | ❌ | ❌ |
 | **SMB / NAS clip upload** | ✅ | ✅ *(v10.7.0 BETA)* | ❌ | ❌ |
 | **Audio-alarm sensitivity (Gen2)** | ✅ select | ✅ command | ❌ | ❌ |
@@ -142,7 +142,7 @@ sequenceDiagram
     Tool-->>Agent: {reachable: true, ip: "...", latency_ms: 12}
 ```
 
-## MCP tools (16 total, v1.3.4)
+## MCP tools (16 total, v1.3.6)
 
 | Tool | Description | Returns |
 |---|---|---|
@@ -164,7 +164,6 @@ sequenceDiagram
 | `bosch_camera_wifi` | Get WiFi RSSI, SSID, and derived signal quality 0-100 % | `{rssi, ssid, signal_strength}` |
 
 Tools intentionally NOT exposed to LLMs (write-risky / time-consuming):
-- Live RTSP stream URLs (no LLM use case)
 - Token refresh (handled silently by the underlying client)
 - Camera sharing / friends (require user-driven flow)
 - Cloud clip download (large payloads)
@@ -193,7 +192,7 @@ LAN-RCP tools (`bosch_camera_privacy_set`, `bosch_camera_light_set`, `bosch_came
 
 ## Privacy stance — media operations are LAN-only
 
-Snapshots and stream URLs go directly from the MCP host to the camera over the LAN — no Bosch cloud relay. The remaining tools (status, events, privacy/light/pan/notifications) still use the cloud because Bosch does not expose a local API for those yet (planned summer 2026).
+Snapshots and stream URLs go directly from the MCP host to the camera over the LAN — no Bosch cloud relay. The remaining tools (status, events, privacy/light/pan/notifications) still use the cloud because no local API is currently exposed for those endpoints.
 
 | Tool | Path |
 |---|---|
@@ -293,22 +292,32 @@ Bosch-Smart-Home-Camera-Tool-MCP/
 ├── src/
 │   └── bosch_camera_mcp/
 │       ├── __init__.py
-│       ├── server.py                 FastMCP server entrypoint
-│       ├── tools/                    one file per tool group
-│       │   ├── cameras.py
-│       │   ├── snapshots.py
-│       │   ├── events.py
-│       │   └── controls.py
-│       ├── resources.py
-│       ├── prompts.py
-│       └── config.py                 config loader, bridging to sister CLI
+│       ├── server.py                 FastMCP server + all 16 MCP tools
+│       ├── adapters/
+│       │   ├── cli_bridge.py         bridge to Python CLI for cloud ops
+│       │   └── __init__.py
+│       ├── lan_rcp.py                direct LAN HTTPS+Digest for RCP writes
+│       ├── maintenance.py            cloud maintenance RSS feed fetcher
+│       ├── errors.py                 shared error types
+│       ├── resources.py              MCP resources (bosch://cameras/…)
+│       └── prompts.py                MCP prompts (daily-summary, pre-leave)
 ├── tests/
-│   ├── conftest.py
-│   └── test_tools_*.py
+│   ├── test_tools_integration.py
+│   ├── test_audio_intrusion_wifi.py
+│   ├── test_cert_pinning.py
+│   ├── test_cred_rotation.py
+│   ├── test_lan_ping.py
+│   ├── test_lan_rcp_https.py
+│   ├── test_maintenance.py
+│   ├── test_packaging.py
+│   ├── test_pan_presets.py
+│   ├── test_prompts.py
+│   ├── test_resources.py
+│   ├── test_skeleton.py
+│   └── test_transport.py
 ├── docs/
 │   ├── architecture.md
-│   ├── tools-reference.md
-│   └── installation.md
+│   └── release-process.md
 └── .gitignore
 ```
 
@@ -323,7 +332,9 @@ Bosch-Smart-Home-Camera-Tool-MCP/
 - **v1.2.0** — `bosch_camera_maintenance_status` tool: fetches cloud maintenance announcements from community RSS feeds; returns state (active/scheduled/past/recent/unknown/idle), title, time window, link. ✅
 - **v1.3.0** — LAN-fallback feature set (ported from HA integration v12.4.10/v12.4.11): `bosch_camera_lan_ping` tool (TCP-probe any camera on LAN); `prefer_local=True` on `bosch_camera_privacy_set` / `bosch_camera_light_set` (RCP-LAN write path, Gen2, cloud fallback on failure); `recommended_action` field on `bosch_camera_maintenance_status` (`"check_lan"` when active, `"wait"` when scheduled). 173 tests. ✅
 - **v1.3.3** — audio get/set, intrusion detection get/set, WiFi info (cross-port from HA v12.7.0). 16 tools. ✅
-- **v1.3.4** — PTZ named presets (`bosch_camera_pan preset=` accepts `home / left / right / back_left / back_right`; overrides `angle`); transparent cred-rotation on 401 for LAN-RCP tools (silent retry, no API change). ✅
+- **v1.3.4** — PTZ named presets (`bosch_camera_pan preset=` accepts `home / left / right / back-left / back-right`; overrides `angle`); transparent cred-rotation on 401 for LAN-RCP tools (silent retry, no API change). ✅
+- **v1.3.6** — 9 bug fixes from live audit 2026-05-24 (camera list always live from cloud, Gen1/Gen2 hw_version, UUID resolution, events field mapping, audio camelCase, intrusion Gen2 gate, error codes, snapshot timestamp, requirements-test.txt mirror). ✅
+- **v1.3.5** — README fixes: version refs, repo layout, tool inventory. ✅
 - **v1.4.0 (next)** — refactor sister CLI into importable `bosch_camera_lib` package (Option B), removing the sys.path injection
 
 ## License

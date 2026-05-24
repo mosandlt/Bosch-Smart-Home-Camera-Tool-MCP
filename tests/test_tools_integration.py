@@ -100,17 +100,21 @@ _CAM2_DETAIL = {
 _EVENTS_CAM1 = [
     {
         "id": "evt-001",
-        "type": "MOTION",
+        "eventType": "MOTION",
+        "eventTags": ["PERSON", "MOVEMENT"],
         "timestamp": "2026-05-17T10:00:00Z",
-        "imageUrl": f"{CLOUD_API}/v11/events/evt-001/image",
-        "clipUrl": f"{CLOUD_API}/v11/events/evt-001/clip",
+        "imageUrl": f"{CLOUD_API}/v11/events/evt-001/snap.jpg",
+        "videoClipUrl": f"{CLOUD_API}/v11/events/evt-001/clip.mp4",
+        "videoClipUploadStatus": "Done",
     },
     {
         "id": "evt-002",
-        "type": "PERSON",
+        "eventType": "PERSON",
+        "eventTags": ["PERSON"],
         "timestamp": "2026-05-17T09:30:00Z",
         "imageUrl": None,
-        "clipUrl": None,
+        "videoClipUrl": None,
+        "videoClipUploadStatus": "Unavailable",
     },
 ]
 

@@ -205,16 +205,45 @@ def bosch_camera_list() -> list[CameraSummary]:
     for name, cam_info in cameras.items():
         cam_id = cam_info.get("id", "")
         status = bc.api_ping(session, cam_id) if cam_id else "UNKNOWN"
+        model = cam_info.get("model", "CAMERA")
         result.append(
             CameraSummary(
                 id=cam_id,
                 name=name,
-                model=cam_info.get("model", "CAMERA"),
-                hw_version=cam_info.get("model", "CAMERA"),
+                model=model,
+                hw_version=_camera_generation(model),
                 status=status,
             )
         )
     return result
+
+
+def _camera_generation(model: str) -> str:
+    """Map hardwareVersion → generation label.
+
+    Gen2 models have the `HOME_*` prefix (HOME_Eyes_Outdoor, HOME_Eyes_Indoor).
+    Gen1 are the legacy `OUTDOOR` / `INDOOR` (CAMERA_EYES / CAMERA_360).
+    """
+    return "Gen2" if model.startswith("HOME_") else "Gen1"
+
+
+def _require_gen2(cam_info: dict, name: str, feature: str) -> None:
+    """Raise hardware_unsupported for Gen1 cams attempting a Gen2-only feature.
+
+    Source of truth is hardwareVersion (stored as ``model`` in cam_info) — the
+    legacy ``has_sound`` flag was unreliable because the CLI scan never wrote
+    it, so every Gen2 cam was blocked (incident 2026-05-24).
+    """
+    model = cam_info.get("model", "")
+    if not model.startswith("HOME_"):
+        raise MCPError(
+            code="hardware_unsupported",
+            detail=(
+                f"Camera '{name}' (model '{model}') does not support {feature}. "
+                "This feature is only available on Gen2 cameras (HOME_Eyes_*)."
+            ),
+            camera=name,
+        )
 
 
 @mcp.tool()
@@ -254,7 +283,11 @@ def bosch_camera_snapshot(camera: str) -> SnapshotResult:
     )
     cache_dir.mkdir(parents=True, exist_ok=True)
 
-    ts_now = datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+    # Filename uses `-` for the time part because `:` is illegal on FAT/NTFS;
+    # the returned `.timestamp` is canonical ISO-8601 for callers to parse.
+    now = datetime.datetime.now()
+    ts_fs = now.strftime("%Y-%m-%dT%H-%M-%S")
+    ts_iso = now.isoformat(timespec="seconds")
 
     data: Optional[bytes] = bc.snap_from_local(cam_info)
 
@@ -268,13 +301,13 @@ def bosch_camera_snapshot(camera: str) -> SnapshotResult:
             camera=name,
         )
 
-    out_path = cache_dir / f"{ts_now}.jpg"
+    out_path = cache_dir / f"{ts_fs}.jpg"
     out_path.write_bytes(data)
 
     return SnapshotResult(
         path=str(out_path),
         method="local_lan",
-        timestamp=ts_now.replace("_", "T").replace("-", ":"),
+        timestamp=ts_iso,
     )
 
 
@@ -336,12 +369,20 @@ def bosch_camera_events(camera: str, limit: int = 10) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     for ev in raw_events[:limit]:
         ts_raw = ev.get("timestamp", "")
+        # Bosch cloud field names: `eventType` + `videoClipUrl` /
+        # `videoClipUploadStatus` (Done|Local|Unavailable). The legacy guesses
+        # `type` / `clipUrl` / `videoUrl` never matched a real payload, so
+        # every event was reported as type=UNKNOWN / has_clip=False.
+        upload_status = ev.get("videoClipUploadStatus", "")
+        has_clip = bool(ev.get("videoClipUrl")) or upload_status == "Done"
         normalized.append(
             {
                 "event_id": ev.get("id", ""),
-                "type": ev.get("type", "UNKNOWN"),
+                "type": ev.get("eventType") or ev.get("type") or "UNKNOWN",
+                "tags": ev.get("eventTags") or [],
                 "timestamp_iso": ts_raw[:19] if ts_raw else "",
-                "has_clip": bool(ev.get("clipUrl") or ev.get("videoUrl")),
+                "has_clip": has_clip,
+                "clip_status": upload_status or None,
             }
         )
     return normalized
@@ -381,7 +422,7 @@ async def bosch_camera_lan_ping(
             )
     else:
         raise MCPError(
-            code="api_unreachable",
+            code="invalid_argument",
             detail="Provide either camera (name) or lan_ip.",
         )
 
@@ -620,17 +661,7 @@ def bosch_camera_audio_get(camera: str) -> AudioSettings:
     br.ensure_cli_importable()
 
     name, cam_info = br._resolve_cam(cameras, camera)
-
-    if not cam_info.get("has_sound", False):
-        model = cam_info.get("model", "unknown")
-        raise MCPError(
-            code="hardware_unsupported",
-            detail=(
-                f"Camera '{name}' (model '{model}') has no audio hardware. "
-                "Audio settings are only available on Gen2 cameras (has_sound=true in config)."
-            ),
-            camera=name,
-        )
+    _require_gen2(cam_info, name, "audio settings")
 
     raw = br.get_audio(session, cam_info["id"])
     mic: Optional[int] = raw.get("microphoneLevel")
@@ -667,21 +698,11 @@ def bosch_camera_audio_set(
     br.ensure_cli_importable()
 
     name, cam_info = br._resolve_cam(cameras, camera)
-
-    if not cam_info.get("has_sound", False):
-        model = cam_info.get("model", "unknown")
-        raise MCPError(
-            code="hardware_unsupported",
-            detail=(
-                f"Camera '{name}' (model '{model}') has no audio hardware. "
-                "Audio settings are only available on Gen2 cameras (has_sound=true in config)."
-            ),
-            camera=name,
-        )
+    _require_gen2(cam_info, name, "audio settings")
 
     if mic_level is None and speaker_level is None:
         raise MCPError(
-            code="permission_denied",
+            code="invalid_argument",
             detail="At least one of mic_level or speaker_level must be provided.",
             camera=name,
         )
@@ -689,7 +710,7 @@ def bosch_camera_audio_set(
     for label, val in (("mic_level", mic_level), ("speaker_level", speaker_level)):
         if val is not None and not (0 <= val <= 100):
             raise MCPError(
-                code="permission_denied",
+                code="invalid_argument",
                 detail=f"{label}={val} is out of range. Must be 0-100.",
                 camera=name,
             )
@@ -726,17 +747,7 @@ def bosch_camera_intrusion_get(camera: str) -> IntrusionConfig:
     br.ensure_cli_importable()
 
     name, cam_info = br._resolve_cam(cameras, camera)
-
-    if not cam_info.get("has_sound", False):
-        model = cam_info.get("model", "unknown")
-        raise MCPError(
-            code="hardware_unsupported",
-            detail=(
-                f"Camera '{name}' (model '{model}') does not support intrusion detection. "
-                "This feature is only available on Gen2 cameras."
-            ),
-            camera=name,
-        )
+    _require_gen2(cam_info, name, "intrusion detection")
 
     raw = br.get_intrusion_config(session, cam_info["id"])
     return IntrusionConfig(
@@ -770,34 +781,24 @@ def bosch_camera_intrusion_set(
     br.ensure_cli_importable()
 
     name, cam_info = br._resolve_cam(cameras, camera)
-
-    if not cam_info.get("has_sound", False):
-        model = cam_info.get("model", "unknown")
-        raise MCPError(
-            code="hardware_unsupported",
-            detail=(
-                f"Camera '{name}' (model '{model}') does not support intrusion detection. "
-                "This feature is only available on Gen2 cameras."
-            ),
-            camera=name,
-        )
+    _require_gen2(cam_info, name, "intrusion detection")
 
     if mode is None and sensitivity is None and distance is None:
         raise MCPError(
-            code="permission_denied",
+            code="invalid_argument",
             detail="At least one of mode, sensitivity, or distance must be provided.",
             camera=name,
         )
 
     if sensitivity is not None and not (0 <= sensitivity <= 7):
         raise MCPError(
-            code="permission_denied",
+            code="invalid_argument",
             detail=f"sensitivity={sensitivity} is out of range. Must be 0-7.",
             camera=name,
         )
     if distance is not None and not (1 <= distance <= 10):
         raise MCPError(
-            code="permission_denied",
+            code="invalid_argument",
             detail=f"distance={distance} is out of range. Must be 1-10.",
             camera=name,
         )

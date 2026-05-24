@@ -1,5 +1,20 @@
 # Changelog — Bosch Smart Home Camera MCP Server
 
+## v1.3.6 (2026-05-24)
+
+**Fix (9 items from live audit):**
+- `bosch_camera_list`: camera list now always fetched live from cloud; stale cache no longer returned after token expiry
+- `bosch_camera_status`: `hw_version` field now correctly distinguishes Gen1 vs Gen2 via `hardwareVersion` field
+- UUID resolution: camera IDs resolved from `deviceId` field; previous mapping used wrong key
+- `bosch_camera_events`: `eventType` / `timestamp` fields now read from correct JSON paths
+- `bosch_camera_audio_get` / `bosch_camera_audio_set`: field names corrected from snake_case to camelCase (`micLevel` → `microphoneLevel` etc.) matching Bosch API
+- `bosch_camera_intrusion_get` / `bosch_camera_intrusion_set`: Gen2 gate now checks `hardwareVersion` (not `cameraType`); Gen1 cameras correctly return `hardware_unsupported`
+- Error codes: HTTP 4xx/5xx responses now surface Bosch error code string instead of raw status integer
+- `bosch_camera_snapshot`: `timestamp` field in response now ISO-8601 string instead of raw epoch integer
+- `requirements_test.txt`: mirrored all runtime deps from `manifest.json` so pytest no longer silently skips test files
+
+---
+
 ## v1.3.4 (2026-05-20)
 
 **New:** `bosch_camera_pan` — `preset` argument: `"home"` (0°) / `"left"` (-60°) / `"right"` (+60°) / `"back_left"` (-120°) / `"back_right"` (+120°). When `preset` is provided it overrides `angle`. Cross-port from HA v12.6.0 pan preset select entity + Python CLI `pan --preset` flag.

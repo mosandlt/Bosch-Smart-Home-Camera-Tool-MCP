@@ -275,7 +275,7 @@ class TestAudioSet:
         with pytest.raises(MCPError) as exc_info:
             bosch_camera_audio_set(camera="Indoor")
 
-        assert exc_info.value.code == "permission_denied"
+        assert exc_info.value.code == "invalid_argument"
 
     @resp_lib.activate
     def test_audio_set_mic_level_boundary_min(self) -> None:
@@ -338,7 +338,7 @@ class TestAudioSet:
         with pytest.raises(MCPError) as exc_info:
             bosch_camera_audio_set(camera="Indoor", mic_level=101)
 
-        assert exc_info.value.code == "permission_denied"
+        assert exc_info.value.code == "invalid_argument"
         assert "101" in exc_info.value.detail
 
     @resp_lib.activate
@@ -350,7 +350,7 @@ class TestAudioSet:
         with pytest.raises(MCPError) as exc_info:
             bosch_camera_audio_set(camera="Indoor", mic_level=-1)
 
-        assert exc_info.value.code == "permission_denied"
+        assert exc_info.value.code == "invalid_argument"
 
     @resp_lib.activate
     def test_audio_set_speaker_level_out_of_range_raises(self) -> None:
@@ -361,7 +361,7 @@ class TestAudioSet:
         with pytest.raises(MCPError) as exc_info:
             bosch_camera_audio_set(camera="Indoor", speaker_level=101)
 
-        assert exc_info.value.code == "permission_denied"
+        assert exc_info.value.code == "invalid_argument"
 
 
 # ---------------------------------------------------------------------------
@@ -495,7 +495,7 @@ class TestIntrusionSet:
         with pytest.raises(MCPError) as exc_info:
             bosch_camera_intrusion_set(camera="Indoor")
 
-        assert exc_info.value.code == "permission_denied"
+        assert exc_info.value.code == "invalid_argument"
 
     @resp_lib.activate
     def test_intrusion_set_sensitivity_boundary_min(self) -> None:
@@ -558,7 +558,7 @@ class TestIntrusionSet:
         with pytest.raises(MCPError) as exc_info:
             bosch_camera_intrusion_set(camera="Indoor", sensitivity=8)
 
-        assert exc_info.value.code == "permission_denied"
+        assert exc_info.value.code == "invalid_argument"
         assert "8" in exc_info.value.detail
 
     @resp_lib.activate
@@ -570,7 +570,7 @@ class TestIntrusionSet:
         with pytest.raises(MCPError) as exc_info:
             bosch_camera_intrusion_set(camera="Indoor", sensitivity=-1)
 
-        assert exc_info.value.code == "permission_denied"
+        assert exc_info.value.code == "invalid_argument"
 
     @resp_lib.activate
     def test_intrusion_set_distance_boundary_min(self) -> None:
@@ -633,7 +633,7 @@ class TestIntrusionSet:
         with pytest.raises(MCPError) as exc_info:
             bosch_camera_intrusion_set(camera="Indoor", distance=0)
 
-        assert exc_info.value.code == "permission_denied"
+        assert exc_info.value.code == "invalid_argument"
 
     @resp_lib.activate
     def test_intrusion_set_distance_out_of_range_raises(self) -> None:
@@ -644,7 +644,7 @@ class TestIntrusionSet:
         with pytest.raises(MCPError) as exc_info:
             bosch_camera_intrusion_set(camera="Indoor", distance=11)
 
-        assert exc_info.value.code == "permission_denied"
+        assert exc_info.value.code == "invalid_argument"
         assert "11" in exc_info.value.detail
 
 

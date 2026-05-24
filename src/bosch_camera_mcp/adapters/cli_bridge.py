@@ -98,9 +98,17 @@ def get_session_and_cameras(
     else:
         cfg = bc.load_config()
 
-    # Check token freshness — buffer of 300 s matches the auth-lifecycle spec
+    # Check token freshness. `_is_token_near_expiry` only fires within the
+    # 300 s buffer BEFORE expiry — for a token already expired by >5 min the
+    # call returns False, so we also need `_is_token_expired` to catch
+    # long-expired tokens (incident 2026-05-24: 34-day-old token never refreshed).
     token = cfg["account"].get("bearer_token", "").strip()
-    if not token or bc._is_token_near_expiry(token, buffer_secs=300):
+    needs_refresh = (
+        not token
+        or bc._is_token_near_expiry(token, buffer_secs=300)
+        or bc._is_token_expired(token)
+    )
+    if needs_refresh:
         logger.warning(
             "Token missing or near-expiry (< 5 min). Attempting silent renewal."
         )
@@ -141,38 +149,52 @@ def get_session_and_cameras(
             )
 
     session = bc.make_session(token)
-    cameras = cfg.get("cameras", {})
-    if not cameras:
-        # Try to load from API (no interactive prompt — just fetch)
-        try:
-            r = session.get(f"{CLOUD_API}/v11/video_inputs", timeout=15)
-            if r.status_code == 401:
-                raise MCPError(
-                    code="reauth_required",
-                    detail=(
-                        "API returned 401. Token expired. "
-                        "Run `python3 bosch_camera.py token browser` to re-authenticate."
-                    ),
-                )
-            r.raise_for_status()
-            cam_list = r.json()
-            for cam in cam_list:
-                name = cam.get("title", cam.get("id", "unknown"))
-                cameras[name] = {
-                    "id": cam.get("id", ""),
-                    "name": name,
-                    "model": cam.get("hardwareVersion", "CAMERA"),
-                    "firmware": cam.get("firmwareVersion", ""),
-                    "mac": cam.get("macAddress", ""),
-                    "download_folder": name,
-                    "local_ip": "",
-                    "local_username": "",
-                    "local_password": "",
-                }
-            cfg["cameras"] = cameras
-        except MCPError:
-            raise
-        except Exception as exc:
+    cached = cfg.get("cameras", {})
+
+    # Always refresh from /v11/video_inputs — the cloud is authoritative for
+    # camera names, hardware version, MAC etc. Pre-2026-05-24 we only hit the
+    # API when `cached` was empty, which caused stale local config to mask
+    # camera renames and new additions. Local-only fields (local_ip / creds)
+    # are preserved by ID across refresh.
+    cameras: dict[str, dict] = {}
+    try:
+        r = session.get(f"{CLOUD_API}/v11/video_inputs", timeout=15)
+        if r.status_code == 401:
+            raise MCPError(
+                code="reauth_required",
+                detail=(
+                    "API returned 401. Token expired. "
+                    "Run `python3 bosch_camera.py token browser` to re-authenticate."
+                ),
+            )
+        r.raise_for_status()
+        # Preserve local-only fields across refresh, keyed by cam id.
+        by_id = {info.get("id"): info for info in cached.values() if info.get("id")}
+        for cam in r.json():
+            cam_id = cam.get("id", "")
+            name = cam.get("title", cam_id or "unknown")
+            prev = by_id.get(cam_id, {})
+            cameras[name] = {
+                "id": cam_id,
+                "name": name,
+                "model": cam.get("hardwareVersion", "CAMERA"),
+                "firmware": cam.get("firmwareVersion", ""),
+                "mac": cam.get("macAddress", ""),
+                "download_folder": prev.get("download_folder", name),
+                "local_ip": prev.get("local_ip", ""),
+                "local_username": prev.get("local_username", ""),
+                "local_password": prev.get("local_password", ""),
+            }
+        cfg["cameras"] = cameras
+    except MCPError:
+        raise
+    except Exception as exc:
+        # Cloud unreachable — fall back to the cached config so that LAN-only
+        # tools (lan_ping with explicit IP, snapshot via local creds) still work.
+        if cached:
+            logger.warning("Cloud refresh failed (%s); using cached cameras", exc)
+            cameras = cached
+        else:
             raise MCPError(
                 code="api_unreachable",
                 detail=f"Failed to discover cameras: {exc}",
@@ -190,7 +212,12 @@ def _resolve_cam(cameras: dict, key: str) -> tuple[str, dict]:
 
     if key in cameras:
         return key, cameras[key]
+    # UUID lookup — Bosch ids look like EF791764-A48D-4F00-9B32-EF04BEB0DDA0.
+    # Case-insensitive because Bosch sometimes hands them back lowercased.
     key_lower = key.lower()
+    for cam_name, info in cameras.items():
+        if (info.get("id") or "").lower() == key_lower:
+            return cam_name, info
     matches = {k: v for k, v in cameras.items() if key_lower in k.lower()}
     if len(matches) == 1:
         name = next(iter(matches))
@@ -396,7 +423,10 @@ def set_audio(
     if mic_level is not None:
         current["microphoneLevel"] = mic_level
     if speaker_level is not None:
-        current["SpeakerLevel"] = speaker_level
+        # Bosch API uses camelCase. PascalCase "SpeakerLevel" is silently
+        # dropped server-side (incident 2026-05-24).
+        current["speakerLevel"] = speaker_level
+        current.pop("SpeakerLevel", None)
     r = session.put(
         f"{CLOUD_API}/v11/video_inputs/{cam_id}/audio",
         json=current,
