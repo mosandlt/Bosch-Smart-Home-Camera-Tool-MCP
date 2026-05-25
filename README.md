@@ -67,7 +67,6 @@ The Bosch Smart Home Camera reverse-engineered API is exposed via four sibling p
 | **Cloud clip download (history ~30 d)** | ✅ via Media Browser | ❌ | ❌ *(parked — no community request yet)* | ❌ *(intentionally not exposed — large payloads)* |
 | **Mini-NVR (motion-triggered local recording)** | ✅ *(v11.2.0 BETA)* | ✅ *(v10.7.0 BETA)* | ❌ | ❌ |
 | **SMB / NAS clip upload** | ✅ | ✅ *(v10.7.0 BETA)* | ❌ | ❌ |
-| **Audio-alarm sensitivity (Gen2)** | ✅ select | ✅ command | ❌ | ❌ |
 | **Camera sharing (friends)** | ❌ | ✅ command | ❌ | ❌ *(intentionally not exposed — needs user-driven flow)* |
 | **Pan / tilt (360° Gen1)** | ✅ services | ✅ command | ✅ `pan_position` DP | ✅ `bosch_camera_pan` |
 | **Named pan presets (home / left / right / back-left / back-right)** | ✅ opt-in select entity | ✅ `pan --preset` flag | ✅ `pan_preset` DP | ✅ `bosch_camera_pan preset=` |
@@ -162,6 +161,10 @@ sequenceDiagram
 | `bosch_camera_intrusion_get` | Get intrusion detection config: mode, sensitivity 0-7, distance 1-10 m (Gen2 only) | `{mode, sensitivity, distance}` |
 | `bosch_camera_intrusion_set` | Update intrusion detection mode/sensitivity/distance (Gen2 only) | `{mode, sensitivity, distance}` |
 | `bosch_camera_wifi` | Get WiFi RSSI, SSID, and derived signal quality 0-100 % | `{rssi, ssid, signal_strength}` |
+| `bosch_camera_mjpeg_snapshot` | Direct LAN MJPEG snapshot via RTSP inst=3 (Gen2 only, ffmpeg, no cloud roundtrip) | `{path, method, timestamp, camera}` |
+| `bosch_camera_onvif_scopes` | Read ONVIF device scopes from camera LAN RCP 0x0a98 (Gen2 only) | `{name, hardware, profiles, raw_scopes}` |
+| `bosch_camera_rcp_version` | Read RCP library version from camera LAN opcodes 0xff00 + 0xff04 | `{primary, secondary, raw_primary_hex, raw_secondary_hex}` |
+| `bosch_camera_feature_flags` | Fetch account-level Bosch cloud feature flags (no camera param) | `{FLAG_NAME: bool, ...}` |
 
 Tools intentionally NOT exposed to LLMs (write-risky / time-consuming):
 - Token refresh (handled silently by the underlying client)
@@ -335,7 +338,7 @@ Bosch-Smart-Home-Camera-Tool-MCP/
 - **v1.3.4** — PTZ named presets (`bosch_camera_pan preset=` accepts `home / left / right / back-left / back-right`; overrides `angle`); transparent cred-rotation on 401 for LAN-RCP tools (silent retry, no API change). ✅
 - **v1.3.6** — 9 bug fixes from live audit 2026-05-24 (camera list always live from cloud, Gen1/Gen2 hw_version, UUID resolution, events field mapping, audio camelCase, intrusion Gen2 gate, error codes, snapshot timestamp, requirements-test.txt mirror). ✅
 - **v1.3.5** — README fixes: version refs, repo layout, tool inventory. ✅
-- **v1.4.0 (next)** — refactor sister CLI into importable `bosch_camera_lib` package (Option B), removing the sys.path injection
+- **v1.4.0 (next)** — 4 new tools: `bosch_camera_mjpeg_snapshot` (direct RTSP frame via ffmpeg, Gen2 LAN), `bosch_camera_onvif_scopes` (RCP 0x0a98 LAN), `bosch_camera_rcp_version` (RCP 0xff00+0xff04 LAN), `bosch_camera_feature_flags` (account-level /v11/feature_flags). `_fetch_rcp_lan` async helper. 20 tools total.
 
 ## License
 

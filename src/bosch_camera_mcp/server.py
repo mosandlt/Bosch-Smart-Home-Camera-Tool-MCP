@@ -1,4 +1,4 @@
-"""MCP server entrypoint — v1.3.4.
+"""MCP server entrypoint — v1.3.6.
 
 All 8 tool bodies are now wired to the sister CLI's bosch_camera.py via
 bosch_camera_mcp.adapters.cli_bridge (Option C: sys.path injection).
@@ -15,9 +15,11 @@ Transport modes:
 from __future__ import annotations
 
 import argparse
+import asyncio
 import datetime
 import logging
 import os
+import ssl
 import sys
 from pathlib import Path
 from typing import Any, Optional
@@ -840,6 +842,302 @@ def bosch_camera_wifi(camera: str) -> WifiInfo:
     ssid: Optional[str] = raw.get("ssid") or raw.get("networkName")
     strength: Optional[int] = raw.get("signal_strength")
     return WifiInfo(rssi=rssi, ssid=ssid, signal_strength=strength)
+
+
+# ── LAN RCP READ helper ───────────────────────────────────────────────────────
+
+
+async def _fetch_rcp_lan(
+    cam_ip: str,
+    user: str,
+    password: str,
+    opcode_hex: str,
+) -> Optional[bytes]:
+    """Send a READ RCP request to the camera's LAN HTTPS endpoint.
+
+    Uses aiohttp with Digest auth and TLS verify disabled (cameras use
+    self-signed certs). Returns the raw response body bytes on HTTP 200,
+    or None on any error (network, auth, non-200).
+
+    Used by bosch_camera_onvif_scopes (0x0a98) and bosch_camera_rcp_version
+    (0xff00 / 0xff04). Pass opcode_hex with or without leading "0x".
+    """
+    import aiohttp
+
+    if not opcode_hex.lower().startswith("0x"):
+        opcode_hex = "0x" + opcode_hex
+
+    url = f"https://{cam_ip}/rcp.xml"
+    params = {
+        "command": opcode_hex,
+        "direction": "READ",
+        "type": "P_OCTET",
+    }
+    ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ssl_ctx.check_hostname = False
+    ssl_ctx.verify_mode = ssl.CERT_NONE
+    try:
+        auth = aiohttp.DigestAuth(login=user, password=password)
+        async with aiohttp.ClientSession(auth=auth) as session:
+            async with session.get(
+                url,
+                params=params,
+                ssl=ssl_ctx,
+                timeout=aiohttp.ClientTimeout(total=5.0),
+            ) as resp:
+                if resp.status == 200:
+                    return await resp.read()
+                logger.debug(
+                    "_fetch_rcp_lan: %s@%s opcode=%s HTTP %d",
+                    opcode_hex, cam_ip, opcode_hex, resp.status,
+                )
+                return None
+    except Exception as exc:  # noqa: BLE001 — best-effort
+        logger.debug("_fetch_rcp_lan: %s@%s error: %s", opcode_hex, cam_ip, exc)
+        return None
+
+
+# ── New tools: MJPEG snapshot, ONVIF scopes, RCP version, feature flags ───────
+
+
+@mcp.tool()
+async def bosch_camera_mjpeg_snapshot(camera: str) -> dict[str, Any]:
+    """Direct LAN MJPEG snapshot via RTSP inst=3 (Gen2 only). Faster than snap.jpg, no cloud roundtrip.
+
+    Uses ffmpeg to pull a single frame from the camera's RTSPS stream (inst=3 = sub-stream,
+    lower resolution but faster). Saves JPEG to ~/.cache/bosch-camera-mcp/snapshots/.
+    Requires ffmpeg installed and MCP host on same LAN as camera.
+    Gen2 only (HOME_Eyes_Outdoor / HOME_Eyes_Indoor).
+    """
+    from urllib.parse import quote as _q
+
+    br = _bridge()
+    cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    _require_gen2(cam_info, name, "MJPEG snapshot")
+
+    local_ip = cam_info.get("local_ip", "").strip()
+    local_user = cam_info.get("local_username", "").strip()
+    local_pass = cam_info.get("local_password", "").strip()
+
+    if not local_ip or not local_user or not local_pass:
+        raise MCPError(
+            code="local_unavailable",
+            detail=(
+                f"No local credentials for camera {name!r}. "
+                "Add local_ip + local_username + local_password in bosch_config.json."
+            ),
+            camera=name,
+        )
+
+    auth_prefix = f"{_q(local_user, safe='')}:{_q(local_pass, safe='')}@"
+    rtsp_url = (
+        f"rtsps://{auth_prefix}{local_ip}:443"
+        "/rtsp_tunnel?inst=3&enableaudio=0&fmtp=1"
+    )
+
+    safe_name = name.replace(" ", "_")
+    cache_dir = (
+        Path.home()
+        / ".cache"
+        / "bosch-camera-mcp"
+        / "snapshots"
+        / safe_name
+    )
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    now = datetime.datetime.now()
+    ts_fs = now.strftime("%Y-%m-%dT%H-%M-%S")
+    ts_iso = now.isoformat(timespec="seconds")
+    out_path = cache_dir / f"{ts_fs}_mjpeg.jpg"
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg",
+            "-rtsp_transport", "tcp",
+            "-i", rtsp_url,
+            "-vframes", "1",
+            "-f", "image2",
+            "-y",
+            str(out_path),
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=20.0)
+        if proc.returncode != 0 or not out_path.exists():
+            stderr_msg = (stderr_bytes or b"").decode(errors="replace")[-300:]
+            raise MCPError(
+                code="local_unavailable",
+                detail=(
+                    f"ffmpeg MJPEG snapshot failed for {name!r} "
+                    f"(exit {proc.returncode}): {stderr_msg}"
+                ),
+                camera=name,
+            )
+    except asyncio.TimeoutError:
+        raise MCPError(
+            code="local_unavailable",
+            detail=f"ffmpeg MJPEG snapshot timed out for {name!r} after 20 s.",
+            camera=name,
+        )
+
+    return {
+        "path": str(out_path),
+        "method": "mjpeg_lan_rtsp",
+        "timestamp": ts_iso,
+        "camera": name,
+    }
+
+
+@mcp.tool()
+async def bosch_camera_onvif_scopes(camera: str) -> dict[str, Any]:
+    """Read ONVIF device scopes from camera via LAN RCP command 0x0a98 (Gen2 only).
+
+    Returns parsed scope fields: name, hardware model, ONVIF profiles, and the
+    raw scope string. Requires local_ip + local credentials in bosch_config.json.
+    Gen2 only (HOME_Eyes_Outdoor / HOME_Eyes_Indoor).
+    """
+    br = _bridge()
+    cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    _require_gen2(cam_info, name, "ONVIF scopes")
+
+    local_ip = cam_info.get("local_ip", "").strip()
+    local_user = cam_info.get("local_username", "").strip()
+    local_pass = cam_info.get("local_password", "").strip()
+
+    if not local_ip or not local_user or not local_pass:
+        raise MCPError(
+            code="local_unavailable",
+            detail=(
+                f"No local credentials for camera {name!r}. "
+                "Add local_ip + local_username + local_password in bosch_config.json."
+            ),
+            camera=name,
+        )
+
+    raw = await _fetch_rcp_lan(local_ip, local_user, local_pass, "0x0a98")
+    if raw is None:
+        raise MCPError(
+            code="local_unavailable",
+            detail=(
+                f"RCP 0x0a98 (ONVIF scopes) failed for {name!r} at {local_ip}. "
+                "Camera may be offline or credentials invalid."
+            ),
+            camera=name,
+        )
+
+    # Parse scope string — typical format:
+    # onvif://www.onvif.org/type/video_encoder onvif://www.onvif.org/name/<n>
+    # onvif://www.onvif.org/hardware/<model> onvif://www.onvif.org/Profile/S ...
+    try:
+        scope_str = raw.decode("utf-8", errors="replace").strip()
+    except Exception:
+        scope_str = repr(raw)
+
+    parsed_name: Optional[str] = None
+    parsed_hw: Optional[str] = None
+    parsed_profiles: list[str] = []
+    for token in scope_str.split():
+        if "/name/" in token:
+            parsed_name = token.split("/name/", 1)[-1]
+        elif "/hardware/" in token:
+            parsed_hw = token.split("/hardware/", 1)[-1]
+        elif "/Profile/" in token:
+            parsed_profiles.append(token.split("/Profile/", 1)[-1])
+
+    return {
+        "name": parsed_name,
+        "hardware": parsed_hw,
+        "profiles": parsed_profiles,
+        "raw_scopes": scope_str,
+    }
+
+
+@mcp.tool()
+async def bosch_camera_rcp_version(camera: str) -> dict[str, Any]:
+    """Read RCP firmware version from camera via LAN (opcodes 0xff00 + 0xff04).
+
+    Returns primary and secondary RCP library versions in dotted decimal and raw hex.
+    Useful for diagnosing protocol compatibility. Requires local_ip + local credentials.
+    """
+    br = _bridge()
+    cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+
+    local_ip = cam_info.get("local_ip", "").strip()
+    local_user = cam_info.get("local_username", "").strip()
+    local_pass = cam_info.get("local_password", "").strip()
+
+    if not local_ip or not local_user or not local_pass:
+        raise MCPError(
+            code="local_unavailable",
+            detail=(
+                f"No local credentials for camera {name!r}. "
+                "Add local_ip + local_username + local_password in bosch_config.json."
+            ),
+            camera=name,
+        )
+
+    primary_raw, secondary_raw = await asyncio.gather(
+        _fetch_rcp_lan(local_ip, local_user, local_pass, "0xff00"),
+        _fetch_rcp_lan(local_ip, local_user, local_pass, "0xff04"),
+    )
+
+    def _parse_version(data: Optional[bytes]) -> tuple[Optional[str], Optional[str]]:
+        """Return (dotted_str, hex_str) from 4-byte RCP version payload."""
+        if data is None or len(data) < 4:
+            return None, None
+        b = data[:4]
+        hex_str = b.hex()
+        dotted = f"{b[0]}.{b[1]}.{b[2]}.{b[3]}"
+        return dotted, hex_str
+
+    pv, ph = _parse_version(primary_raw)
+    sv, sh = _parse_version(secondary_raw)
+
+    return {
+        "primary": pv,
+        "secondary": sv,
+        "raw_primary_hex": ph,
+        "raw_secondary_hex": sh,
+    }
+
+
+@mcp.tool()
+def bosch_camera_feature_flags() -> dict[str, Any]:
+    """Fetch account-level Bosch cloud feature flags from GET /v11/feature_flags.
+
+    Returns the raw dict of feature flag names to boolean values, e.g.
+    {"APP_RATING": true, "IOT_THINGS_INTEGRATION": true, ...}.
+    No camera parameter — flags are account-level.
+    Useful for discovering which Bosch platform features are active for this account.
+    """
+    br = _bridge()
+    cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    from .adapters.cli_bridge import CLOUD_API  # noqa: PLC0415
+
+    r = session.get(f"{CLOUD_API}/v11/feature_flags", timeout=10)
+    if r.status_code == 200:
+        data = r.json()
+        # API may return a list of {name, enabled} or a flat dict — normalise both
+        if isinstance(data, list):
+            return {item.get("name", str(i)): bool(item.get("enabled", False))
+                    for i, item in enumerate(data)}
+        if isinstance(data, dict):
+            return {k: bool(v) for k, v in data.items()}
+        return {"raw": data}
+
+    from .adapters.cli_bridge import _raise_api_error  # noqa: PLC0415
+    _raise_api_error(r, "bosch_camera_feature_flags")
+    return {}  # unreachable
 
 
 # ── Register resources + prompts ──────────────────────────────────────────────
