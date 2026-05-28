@@ -600,7 +600,7 @@ class TestIntrusionSet:
 
     @resp_lib.activate
     def test_intrusion_set_distance_boundary_max(self) -> None:
-        """distance=10 is valid upper boundary."""
+        """distance=8 is the valid upper boundary (Bosch API limit, verified 2026-05-28 FW 9.40.102)."""
         resp_lib.add(
             resp_lib.GET,
             f"{CLOUD_API}/v11/video_inputs/{CAM_ID_GEN2}/intrusionDetectionConfig",
@@ -615,14 +615,24 @@ class TestIntrusionSet:
         resp_lib.add(
             resp_lib.GET,
             f"{CLOUD_API}/v11/video_inputs/{CAM_ID_GEN2}/intrusionDetectionConfig",
-            json={**_INTRUSION_RESPONSE, "distance": 10},
+            json={**_INTRUSION_RESPONSE, "distance": 8},
             status=200,
         )
 
         from bosch_camera_mcp.server import bosch_camera_intrusion_set
 
-        result = bosch_camera_intrusion_set(camera="Indoor", distance=10)
-        assert result.distance == 10
+        result = bosch_camera_intrusion_set(camera="Indoor", distance=8)
+        assert result.distance == 8
+
+    def test_intrusion_set_distance_rejected_above_eight(self) -> None:
+        """distance=9 is rejected client-side after the v1.5.0 boundary fix."""
+        from bosch_camera_mcp.errors import MCPError
+        from bosch_camera_mcp.server import bosch_camera_intrusion_set
+
+        with pytest.raises(MCPError) as exc_info:
+            bosch_camera_intrusion_set(camera="Indoor", distance=9)
+        assert exc_info.value.code == "invalid_argument"
+        assert "1-8" in exc_info.value.detail
 
     @resp_lib.activate
     def test_intrusion_set_distance_zero_raises(self) -> None:

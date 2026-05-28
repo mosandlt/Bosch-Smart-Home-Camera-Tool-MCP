@@ -573,7 +573,7 @@ class TestLightSet:
         assert err.code == "hardware_unsupported"
         assert "Innen" in err.detail
         assert "HOME_Eyes_Indoor" in err.detail
-        assert "Eyes Outdoor II" in err.detail
+        assert "Eyes Außenkamera II" in err.detail
         # Confirm no cloud API call was made
         assert api_called == [], "set_light() must not be called for no-light cameras"
 
