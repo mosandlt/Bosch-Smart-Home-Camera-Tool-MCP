@@ -455,6 +455,40 @@ def get_intrusion_config(session: requests.Session, cam_id: str) -> dict:
     return {}  # unreachable
 
 
+def trigger_siren(
+    session: requests.Session,
+    cam_id: str,
+    model: str,
+    stop: bool = False,
+) -> bool:
+    """Trigger or stop the indoor siren — endpoint depends on the camera model.
+
+    - Gen1 360° (model "INDOOR"): PUT /v11/video_inputs/{id}/acoustic_alarm
+      Body: {"enabled": <bool>}.  Returns HTTP 442 on outdoor models.
+    - Gen2 Indoor II (model "HOME_Eyes_Indoor"): PUT /v11/video_inputs/{id}/panic_alarm
+      Body: {"status": "ON"|"OFF"}.  Used by HA integration's BoschPanicAlarmSwitch.
+
+    Returns True on HTTP 2xx, raises on failure.
+    """
+    # Gen1's /acoustic_alarm endpoint returns HTTP 404 in production (verified
+    # 2026-05-28 — both Gen1 INDOOR and OUTDOOR). The correct Gen1 siren endpoint
+    # has not been identified yet; for now only Gen2 Indoor II is supported.
+    if model == "HOME_Eyes_Indoor":
+        url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/panic_alarm"
+        body: dict = {"status": "OFF" if stop else "ON"}
+    else:
+        raise ValueError(
+            f"trigger_siren: unsupported camera model '{model}'. "
+            "Only HOME_Eyes_Indoor (Gen2 Indoor II) has a working siren endpoint via /panic_alarm. "
+            "Gen1 INDOOR's documented /acoustic_alarm endpoint returns HTTP 404."
+        )
+    r = session.put(url, json=body, headers={"Content-Type": "application/json"}, timeout=10)
+    if r.status_code in (200, 201, 204):
+        return True
+    _raise_api_error(r, f"trigger_siren({cam_id}, model={model}, stop={stop})")
+    return False  # unreachable
+
+
 def set_intrusion_config(
     session: requests.Session,
     cam_id: str,
@@ -465,13 +499,31 @@ def set_intrusion_config(
     """PUT /v11/video_inputs/{cam_id}/intrusionDetectionConfig — partial update.
 
     Fetches current config first, merges requested fields, then PUT full body.
+
+    **detectionMode** (`mode` parameter for backwards-compat — both accepted):
+    Bosch's actual API field is ``detectionMode`` (camelCase), not ``mode``.
+    Previous versions sent ``"mode"`` and Bosch silently dropped the field
+    (verified 2026-05-28 against FW 9.40.102 — sensitivity + distance writes
+    succeeded, mode field was ignored). Source: HA-integration ``api-findings.md``
+    §6.2 + the captured iOS app PUT body.
+
+    Valid values: ``PERSON | STANDARD | HIGH_SENSITIVITY | ZONES |
+    ALL_MOTIONS | ONLY_HUMANS`` (NOT ``OFF|ACTIVE|SCHEDULED`` as previously
+    misdocumented). To "turn off" intrusion detection set ``enabled`` to
+    ``false`` instead — but our partial-update API doesn't expose that yet.
+
     sensitivity: 0-7 (HA v12.6.0 FW 9.40+ confirmed range).
-    distance: 1-10 (iOS app slider range, capture 2026-04-28).
+    distance: 1-8 (Bosch API rejects 9+ with HTTP 400 "must be less than or equal
+    to 8" — verified 2026-05-28 against FW 9.40.102. The iOS app slider goes to
+    10 visually but the server still enforces ≤ 8).
     Extracted from HA v12.6.0 BoschIntrusionSensitivityNumber.
     """
     current = get_intrusion_config(session, cam_id)
     if mode is not None:
-        current["mode"] = mode
+        # Bosch's field is detectionMode (camelCase). Strip any legacy "mode"
+        # key the cache might have so the PUT body only carries the correct one.
+        current["detectionMode"] = mode
+        current.pop("mode", None)
     if sensitivity is not None:
         current["sensitivity"] = sensitivity
     if distance is not None:
@@ -503,12 +555,175 @@ def get_wifi_info(session: requests.Session, cam_id: str) -> dict:
         data = dict(r.json())
         rssi: Optional[int] = data.get("rssi") or data.get("signalStrength")
         if rssi is not None:
-            # Map RSSI dBm to 0-100% signal quality
-            clamped = max(-100, min(-50, int(rssi)))
-            data["signal_strength"] = int(round((clamped + 100) * 2))
+            rssi_int = int(rssi)
+            if rssi_int >= 0:
+                # Bosch firmware on some cams returns a 0–100 quality value here,
+                # not real dBm. Pass through as quality; the dBm field stays raw.
+                data["signal_strength"] = max(0, min(100, rssi_int))
+            else:
+                # Real RSSI dBm — map to 0–100% (>= -50 dBm = 100, <= -100 dBm = 0).
+                clamped = max(-100, min(-50, rssi_int))
+                data["signal_strength"] = int(round((clamped + 100) * 2))
         return data
     _raise_api_error(r, f"get_wifi_info({cam_id})")
     return {}  # unreachable
+
+
+def get_motion_config(session: requests.Session, cam_id: str) -> dict:
+    """GET /v11/video_inputs/{cam_id}/motion.
+
+    Returns {enabled, motionAlarmConfiguration (= sensitivity string), ...}.
+    Sensitivity values: OFF | LOW | MEDIUM_LOW | MEDIUM_HIGH | HIGH | SUPER_HIGH.
+    API reference: cmd_motion in bosch_camera.py.
+    """
+    r = session.get(f"{CLOUD_API}/v11/video_inputs/{cam_id}/motion", timeout=10)
+    if r.status_code == 200:
+        return dict(r.json())
+    _raise_api_error(r, f"get_motion_config({cam_id})")
+    return {}  # unreachable
+
+
+def set_motion_config(
+    session: requests.Session,
+    cam_id: str,
+    enabled: Optional[bool] = None,
+    sensitivity: Optional[str] = None,
+) -> bool:
+    """PUT /v11/video_inputs/{cam_id}/motion — partial update.
+
+    Fetches current config first, merges requested fields, then PUT full body.
+    Body: {"enabled": bool, "motionAlarmConfiguration": sensitivity_str}
+    Sensitivity values: OFF | LOW | MEDIUM_LOW | MEDIUM_HIGH | HIGH | SUPER_HIGH.
+    Note: setting sensitivity implicitly enables motion (mirrors CLI behavior).
+    API reference: cmd_motion in bosch_camera.py.
+    """
+    current = get_motion_config(session, cam_id)
+    if enabled is not None:
+        current["enabled"] = enabled
+    if sensitivity is not None:
+        current["motionAlarmConfiguration"] = sensitivity
+        # Setting sensitivity implicitly enables motion (mirrors CLI behavior)
+        current["enabled"] = True
+    # Re-apply explicit enabled=False even after sensitivity was set
+    if enabled is False:
+        current["enabled"] = False
+    r = session.put(
+        f"{CLOUD_API}/v11/video_inputs/{cam_id}/motion",
+        json=current,
+        headers={"Content-Type": "application/json"},
+        timeout=10,
+    )
+    if r.status_code in (200, 201, 204):
+        return True
+    _raise_api_error(r, f"set_motion_config({cam_id})")
+    return False  # unreachable
+
+
+def get_recording_options(session: requests.Session, cam_id: str) -> dict:
+    """GET /v11/video_inputs/{cam_id}/recording_options.
+
+    Returns {recordSound: bool, ...}.
+    API reference: cmd_recording in bosch_camera.py.
+    """
+    r = session.get(f"{CLOUD_API}/v11/video_inputs/{cam_id}/recording_options", timeout=10)
+    if r.status_code == 200:
+        return dict(r.json())
+    _raise_api_error(r, f"get_recording_options({cam_id})")
+    return {}  # unreachable
+
+
+def set_recording_options(
+    session: requests.Session,
+    cam_id: str,
+    sound_on: bool,
+) -> bool:
+    """PUT /v11/video_inputs/{cam_id}/recording_options.
+
+    Body: {"recordSound": bool}.
+    API reference: cmd_recording in bosch_camera.py.
+    """
+    r = session.put(
+        f"{CLOUD_API}/v11/video_inputs/{cam_id}/recording_options",
+        json={"recordSound": sound_on},
+        headers={"Content-Type": "application/json"},
+        timeout=10,
+    )
+    if r.status_code in (200, 201, 204):
+        return True
+    _raise_api_error(r, f"set_recording_options({cam_id})")
+    return False  # unreachable
+
+
+def get_autofollow(session: requests.Session, cam_id: str) -> dict:
+    """GET /v11/video_inputs/{cam_id}/autofollow.
+
+    Returns {result: bool}.
+    Only available for cameras with featureSupport.panLimit > 0 (CAMERA_360).
+    API reference: cmd_autofollow in bosch_camera.py.
+    """
+    r = session.get(f"{CLOUD_API}/v11/video_inputs/{cam_id}/autofollow", timeout=10)
+    if r.status_code == 200:
+        return dict(r.json())
+    _raise_api_error(r, f"get_autofollow({cam_id})")
+    return {}  # unreachable
+
+
+def set_autofollow(
+    session: requests.Session,
+    cam_id: str,
+    enabled: bool,
+) -> bool:
+    """PUT /v11/video_inputs/{cam_id}/autofollow.
+
+    Body: {"result": bool}.
+    Response: HTTP 204 on success.
+    API reference: cmd_autofollow in bosch_camera.py.
+    """
+    r = session.put(
+        f"{CLOUD_API}/v11/video_inputs/{cam_id}/autofollow",
+        json={"result": enabled},
+        headers={"Content-Type": "application/json"},
+        timeout=10,
+    )
+    if r.status_code in (200, 201, 204):
+        return True
+    _raise_api_error(r, f"set_autofollow({cam_id})")
+    return False  # unreachable
+
+
+def get_privacy_sound(session: requests.Session, cam_id: str) -> dict:
+    """GET /v11/video_inputs/{cam_id}/privacy_sound_override.
+
+    Returns {result: bool} — True means audible indicator is on.
+    API reference: cmd_privacy_sound in bosch_camera.py.
+    """
+    r = session.get(f"{CLOUD_API}/v11/video_inputs/{cam_id}/privacy_sound_override", timeout=10)
+    if r.status_code == 200:
+        return dict(r.json())
+    _raise_api_error(r, f"get_privacy_sound({cam_id})")
+    return {}  # unreachable
+
+
+def set_privacy_sound(
+    session: requests.Session,
+    cam_id: str,
+    enabled: bool,
+) -> bool:
+    """PUT /v11/video_inputs/{cam_id}/privacy_sound_override.
+
+    Body: {"result": bool}.
+    API reference: cmd_privacy_sound in bosch_camera.py.
+    """
+    r = session.put(
+        f"{CLOUD_API}/v11/video_inputs/{cam_id}/privacy_sound_override",
+        json={"result": enabled},
+        headers={"Content-Type": "application/json"},
+        timeout=10,
+    )
+    if r.status_code in (200, 201, 204):
+        return True
+    _raise_api_error(r, f"set_privacy_sound({cam_id})")
+    return False  # unreachable
 
 
 def _raise_api_error(resp: requests.Response, context: str) -> None:

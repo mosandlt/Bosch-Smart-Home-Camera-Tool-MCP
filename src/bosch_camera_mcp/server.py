@@ -1,4 +1,4 @@
-"""MCP server entrypoint — v1.3.6.
+"""MCP server entrypoint — v1.6.0.
 
 All 8 tool bodies are now wired to the sister CLI's bosch_camera.py via
 bosch_camera_mcp.adapters.cli_bridge (Option C: sys.path injection).
@@ -109,7 +109,12 @@ class IntrusionConfig(BaseModel):
 
     mode: Optional[str] = Field(
         default=None,
-        description="Detection mode, e.g. OFF | ACTIVE | SCHEDULED",
+        description=(
+            "Detection mode (Bosch API field 'detectionMode'). "
+            "Valid: PERSON | STANDARD | HIGH_SENSITIVITY | ZONES | ALL_MOTIONS | ONLY_HUMANS. "
+            "Corrected 2026-05-28 — previously documented as OFF|ACTIVE|SCHEDULED which Bosch "
+            "silently ignored because both the field name and the value set were wrong."
+        ),
     )
     sensitivity: Optional[int] = Field(
         default=None, description="Detection sensitivity (0-7; 0=low, 7=high)"
@@ -129,6 +134,74 @@ class WifiInfo(BaseModel):
     signal_strength: Optional[int] = Field(
         default=None,
         description="Signal quality 0-100 % derived from RSSI (-50 dBm = 100 %, -100 dBm = 0 %)",
+    )
+
+
+class MotionConfig(BaseModel):
+    """Motion detection configuration returned by bosch_camera_motion_get."""
+
+    enabled: bool = Field(description="Whether motion detection is enabled")
+    sensitivity: Optional[str] = Field(
+        default=None,
+        description=(
+            "Motion alarm sensitivity: OFF | LOW | MEDIUM_LOW | MEDIUM_HIGH | HIGH | SUPER_HIGH. "
+            "Stored in 'motionAlarmConfiguration' field in the API."
+        ),
+    )
+
+
+class RecordingOptions(BaseModel):
+    """Cloud recording options returned by bosch_camera_recording_get."""
+
+    sound_on: bool = Field(description="Whether audio is included in cloud recordings")
+
+
+class AutofollowConfig(BaseModel):
+    """Auto-follow (360° auto-tracking) config returned by bosch_camera_autofollow_get."""
+
+    enabled: bool = Field(description="Whether auto-follow tracking is enabled")
+
+
+class PrivacySoundConfig(BaseModel):
+    """Privacy-sound override config returned by bosch_camera_privacy_sound_get."""
+
+    enabled: bool = Field(
+        description="Whether the camera plays an audible indicator when privacy mode changes"
+    )
+
+
+class UnreadCount(BaseModel):
+    """Unread event count returned by bosch_camera_unread_get."""
+
+    camera: str = Field(description="Camera name")
+    count: int = Field(description="Number of unread events (from video_inputs listing)")
+
+
+class CameraHealthEntry(BaseModel):
+    """Per-camera health summary entry for bosch_camera_health_check_all."""
+
+    name: str
+    status: str
+    privacy_mode: bool
+    wifi_rssi: Optional[int] = None
+    wifi_signal_strength: Optional[int] = None
+    last_event_at: Optional[str] = None
+    unread_count: int = 0
+    error: Optional[str] = Field(
+        default=None, description="Set when this camera's check failed"
+    )
+
+
+class TokenStatus(BaseModel):
+    """Token validity returned by bosch_camera_token_status."""
+
+    valid: bool = Field(description="True if the token is not expired")
+    expires_in_min: Optional[int] = Field(
+        default=None,
+        description="Minutes until expiry (negative = already expired); None if undecodable",
+    )
+    email: Optional[str] = Field(
+        default=None, description="Email/preferred_username from JWT claims"
     )
 
 
@@ -218,6 +291,26 @@ def bosch_camera_list() -> list[CameraSummary]:
             )
         )
     return result
+
+
+def _wrap_privacy_blocked(exc: Exception, name: str) -> Optional[MCPError]:
+    """Convert raw Bosch HTTP 443 'camera.in.privacy.mode' into a clean MCPError.
+
+    Returns the wrapping MCPError if the exception matches the privacy-blocked
+    signature, otherwise None (caller should re-raise the original).
+    """
+    msg = str(exc)
+    if "camera.in.privacy.mode" in msg or "HTTP 443" in msg:
+        return MCPError(
+            code="privacy_blocked",
+            detail=(
+                f"Camera '{name}' is in privacy mode — operation refused by Bosch cloud "
+                "(HTTP 443 sh:camera.in.privacy.mode). Disable privacy first with "
+                "bosch_camera_privacy_set(camera, enabled=False)."
+            ),
+            camera=name,
+        )
+    return None
 
 
 def _camera_generation(model: str) -> str:
@@ -488,6 +581,16 @@ async def bosch_camera_privacy_set(
             )
 
     br.set_privacy_mode(session, cam_info["id"], enabled)
+    # Cloud occasionally lags behind the PUT — poll briefly until the camera detail
+    # reflects the requested state, so we don't return stale `privacy_mode` to the agent.
+    import time as _time  # local import to keep top of module clean
+    import bosch_camera as bc  # type: ignore[import-not-found]
+    expected = "ON" if enabled else "OFF"
+    for _ in range(10):  # 10 × 0.5 s = 5 s budget
+        detail = bc.api_get_camera(session, cam_info["id"]) or {}
+        if str(detail.get("privacyMode", "")).upper() == expected:
+            break
+        _time.sleep(0.5)
     return _build_status(name, cam_info, session, cfg)
 
 
@@ -514,14 +617,17 @@ async def bosch_camera_light_set(
 
     name, cam_info = br._resolve_cam(cameras, camera)
 
-    # Gate: reject cameras without a controllable light before any API call.
-    if not cam_info.get("has_light", False):
-        model = cam_info.get("model", "unknown")
+    # Gate: reject cameras without controllable light hardware before any API call.
+    # The config `has_light` flag is sometimes stale, so also accept Eyes Außenkamera II
+    # (model == "HOME_Eyes_Outdoor") by hardware identity — that model always has lights.
+    model = cam_info.get("model", "")
+    has_light = cam_info.get("has_light", False) or model == "HOME_Eyes_Outdoor"
+    if not has_light:
         raise MCPError(
             code="hardware_unsupported",
             detail=(
-                f"Camera '{name}' (model '{model}') has no controllable light hardware. "
-                "Light is only available on Eyes Outdoor II."
+                f"Camera '{name}' (model '{model or 'unknown'}') has no controllable light hardware. "
+                "Light is only available on Eyes Außenkamera II (HOME_Eyes_Outdoor)."
             ),
             camera=name,
         )
@@ -593,7 +699,70 @@ def bosch_camera_pan(
     name, cam_info = br._resolve_cam(cameras, camera)
     # preset param overrides direction
     effective = preset if preset is not None else direction
-    br.set_pan(session, cam_info["id"], effective)
+    try:
+        br.set_pan(session, cam_info["id"], effective)
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
+    return _build_status(name, cam_info, session, cfg)
+
+
+@mcp.tool()
+def bosch_camera_siren_trigger(camera: str, stop: bool = False) -> CameraStatus:
+    """Trigger (or stop) the indoor siren on a camera.
+
+    Endpoint depends on the camera model:
+
+    - **Gen1 360° indoor** (``model == "INDOOR"``) → ``PUT /v11/video_inputs/{id}/acoustic_alarm``
+      Body: ``{"enabled": <bool>}``.  Outdoor cameras return HTTP 442 (not supported).
+    - **Gen2 Indoor II** (``model == "HOME_Eyes_Indoor"``) → ``PUT /v11/video_inputs/{id}/panic_alarm``
+      Body: ``{"status": "ON"|"OFF"}``. 75 dB integrated siren.
+
+    The siren plays for the camera-side configured duration (typically 30–60 s
+    on Gen2). To change the duration on Gen2, use the HA integration's
+    ``number.bosch_<cam>_sirenen_dauer`` entity (range 10–300 s).
+
+    Raises ``hardware_unsupported`` for outdoor cameras and Gen1 outdoor models.
+    Raises ``privacy_blocked`` when the camera is in privacy mode (Gen2 panic
+    alarm is gated by privacyMode at the Bosch cloud level).
+
+    Args:
+        camera: Camera name (case-insensitive).
+        stop:   If True, send the stop variant ({"enabled": False} or {"status": "OFF"}).
+                Useful for cancelling an active Gen2 panic alarm before its duration expires.
+    """
+    br = _bridge()
+    cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    model = cam_info.get("model", "")
+    # NOTE: only HOME_Eyes_Indoor (Gen2 Indoor II) has a working siren endpoint
+    # (/panic_alarm).  Gen1 indoor's documented /acoustic_alarm returns HTTP 404
+    # in production (verified 2026-05-28) — not supported here until the correct
+    # Gen1 endpoint is found.
+    if model != "HOME_Eyes_Indoor":
+        raise MCPError(
+            code="hardware_unsupported",
+            detail=(
+                f"Camera '{name}' (model '{model or 'unknown'}') has no siren tool support. "
+                "Only Gen2 Indoor II (HOME_Eyes_Indoor) has the working /panic_alarm endpoint. "
+                "Gen1 360° indoor's /acoustic_alarm returns HTTP 404 — endpoint unknown."
+            ),
+            camera=name,
+        )
+
+    try:
+        br.trigger_siren(session, cam_info["id"], model=model, stop=stop)
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
+
+    logger.info("siren_trigger(%s, stop=%s, model=%s): OK", name, stop, model)
     return _build_status(name, cam_info, session, cfg)
 
 
@@ -740,9 +909,10 @@ def bosch_camera_intrusion_get(camera: str) -> IntrusionConfig:
     (``has_sound=true`` in config is reused as the Gen2 gate; intrusion detection
     is a Gen2-only feature).  Raises ``hardware_unsupported`` for Gen1 cameras.
 
-    ``mode``: detection activation mode (e.g. ``OFF`` | ``ACTIVE`` | ``SCHEDULED``).
+    ``mode``: ``PERSON`` | ``STANDARD`` | ``HIGH_SENSITIVITY`` | ``ZONES`` |
+    ``ALL_MOTIONS`` | ``ONLY_HUMANS`` (maps to Bosch API field ``detectionMode``).
     ``sensitivity``: 0 (low) to 7 (high) — confirmed range FW 9.40+.
-    ``distance``: detection range in meters, 1-10.
+    ``distance``: detection range in meters, 1-8 (Bosch API limit).
     """
     br = _bridge()
     cfg, session, cameras = _get_session()
@@ -751,7 +921,13 @@ def bosch_camera_intrusion_get(camera: str) -> IntrusionConfig:
     name, cam_info = br._resolve_cam(cameras, camera)
     _require_gen2(cam_info, name, "intrusion detection")
 
-    raw = br.get_intrusion_config(session, cam_info["id"])
+    try:
+        raw = br.get_intrusion_config(session, cam_info["id"])
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
     return IntrusionConfig(
         mode=raw.get("mode"),
         sensitivity=raw.get("sensitivity"),
@@ -771,9 +947,14 @@ def bosch_camera_intrusion_set(
     Gen2-only feature — raises ``hardware_unsupported`` for Gen1 cameras.
     At least one parameter must be provided.
 
-    ``mode``: ``OFF`` | ``ACTIVE`` | ``SCHEDULED``.
+    ``mode``: ``PERSON`` | ``STANDARD`` | ``HIGH_SENSITIVITY`` | ``ZONES`` |
+    ``ALL_MOTIONS`` | ``ONLY_HUMANS`` (maps to Bosch API field ``detectionMode``).
+    v1.6.0 incorrectly documented ``OFF|ACTIVE|SCHEDULED`` and silently sent ``mode``
+    instead of ``detectionMode`` — Bosch's API accepted the request but dropped the
+    field. Fixed in v1.6.1.
     ``sensitivity``: 0-7 (0 = low, 7 = high; FW 9.40+ confirmed range).
-    ``distance``: detection range in meters, 1-10.
+    ``distance``: detection range in meters, 1-8 (Bosch API rejects 9+ with
+    HTTP 400 ``"must be less than or equal to 8"`` — verified 2026-05-28 FW 9.40.102).
 
     Unspecified fields are preserved from the current camera configuration.
     Returns the updated ``{mode, sensitivity, distance}`` after write.
@@ -798,17 +979,23 @@ def bosch_camera_intrusion_set(
             detail=f"sensitivity={sensitivity} is out of range. Must be 0-7.",
             camera=name,
         )
-    if distance is not None and not (1 <= distance <= 10):
+    if distance is not None and not (1 <= distance <= 8):
         raise MCPError(
             code="invalid_argument",
-            detail=f"distance={distance} is out of range. Must be 1-10.",
+            detail=f"distance={distance} is out of range. Must be 1-8 (Bosch API limit).",
             camera=name,
         )
 
-    br.set_intrusion_config(
-        session, cam_info["id"], mode=mode, sensitivity=sensitivity, distance=distance
-    )
-    raw = br.get_intrusion_config(session, cam_info["id"])
+    try:
+        br.set_intrusion_config(
+            session, cam_info["id"], mode=mode, sensitivity=sensitivity, distance=distance
+        )
+        raw = br.get_intrusion_config(session, cam_info["id"])
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
     return IntrusionConfig(
         mode=raw.get("mode"),
         sensitivity=raw.get("sensitivity"),
@@ -1138,6 +1325,426 @@ def bosch_camera_feature_flags() -> dict[str, Any]:
     from .adapters.cli_bridge import _raise_api_error  # noqa: PLC0415
     _raise_api_error(r, "bosch_camera_feature_flags")
     return {}  # unreachable
+
+
+# ── v1.6.0 tools: motion, recording, autofollow, privacy_sound, unread, health_check_all, token_status ──
+
+
+@mcp.tool()
+def bosch_camera_motion_get(camera: str) -> MotionConfig:
+    """Get motion detection settings for one camera.
+
+    Returns ``{enabled, sensitivity}`` where sensitivity is one of:
+    ``OFF | LOW | MEDIUM_LOW | MEDIUM_HIGH | HIGH | SUPER_HIGH``.
+
+    API: GET /v11/video_inputs/{id}/motion.
+    """
+    br = _bridge()
+    cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    try:
+        raw = br.get_motion_config(session, cam_info["id"])
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
+    return MotionConfig(
+        enabled=bool(raw.get("enabled", False)),
+        sensitivity=raw.get("motionAlarmConfiguration") or raw.get("sensitivity"),
+    )
+
+
+@mcp.tool()
+def bosch_camera_motion_set(
+    camera: str,
+    enabled: Optional[bool] = None,
+    sensitivity: Optional[str] = None,
+) -> MotionConfig:
+    """Set motion detection enabled state and/or sensitivity for one camera.
+
+    At least one of ``enabled`` or ``sensitivity`` must be provided.
+
+    ``sensitivity``: ``OFF | LOW | MEDIUM_LOW | MEDIUM_HIGH | HIGH | SUPER_HIGH``.
+    Note: providing only ``sensitivity`` also implicitly enables motion detection
+    (mirrors the CLI behavior — setting sensitivity implies you want it active).
+
+    API: PUT /v11/video_inputs/{id}/motion.
+    """
+    br = _bridge()
+    cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+
+    if enabled is None and sensitivity is None:
+        raise MCPError(
+            code="invalid_argument",
+            detail="At least one of enabled or sensitivity must be provided.",
+            camera=name,
+        )
+
+    VALID_SENSITIVITIES = {"OFF", "LOW", "MEDIUM_LOW", "MEDIUM_HIGH", "HIGH", "SUPER_HIGH"}
+    if sensitivity is not None and sensitivity.upper() not in VALID_SENSITIVITIES:
+        raise MCPError(
+            code="invalid_argument",
+            detail=(
+                f"sensitivity={sensitivity!r} is not valid. "
+                f"Must be one of: {', '.join(sorted(VALID_SENSITIVITIES))}."
+            ),
+            camera=name,
+        )
+
+    try:
+        br.set_motion_config(
+            session, cam_info["id"],
+            enabled=enabled,
+            sensitivity=sensitivity.upper() if sensitivity else None,
+        )
+        raw = br.get_motion_config(session, cam_info["id"])
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
+    return MotionConfig(
+        enabled=bool(raw.get("enabled", False)),
+        sensitivity=raw.get("motionAlarmConfiguration") or raw.get("sensitivity"),
+    )
+
+
+@mcp.tool()
+def bosch_camera_recording_get(camera: str) -> RecordingOptions:
+    """Get cloud recording options for one camera.
+
+    Returns ``{sound_on}`` — whether audio is recorded in cloud clips.
+
+    API: GET /v11/video_inputs/{id}/recording_options.
+    """
+    br = _bridge()
+    cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    try:
+        raw = br.get_recording_options(session, cam_info["id"])
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
+    return RecordingOptions(sound_on=bool(raw.get("recordSound", False)))
+
+
+@mcp.tool()
+def bosch_camera_recording_set(camera: str, sound_on: bool) -> RecordingOptions:
+    """Enable or disable audio in cloud recordings for one camera.
+
+    ``sound_on=True``  → record audio in cloud clips.
+    ``sound_on=False`` → no audio in cloud clips.
+
+    API: PUT /v11/video_inputs/{id}/recording_options  Body: ``{"recordSound": bool}``.
+    """
+    br = _bridge()
+    cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    try:
+        br.set_recording_options(session, cam_info["id"], sound_on=sound_on)
+        raw = br.get_recording_options(session, cam_info["id"])
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
+    return RecordingOptions(sound_on=bool(raw.get("recordSound", False)))
+
+
+@mcp.tool()
+def bosch_camera_autofollow_get(camera: str) -> AutofollowConfig:
+    """Get auto-follow (360° auto-tracking) state for one camera.
+
+    Returns ``{enabled}``.  Only meaningful for 360° cameras with ``panLimit > 0``
+    (Gen1 CAMERA_360 indoor). Raises ``hardware_unsupported`` for non-360° cameras.
+
+    API: GET /v11/video_inputs/{id}/autofollow.
+    """
+    br = _bridge()
+    cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    # Gate: panLimit must be > 0 for auto-follow to make sense
+    pan_limit = cam_info.get("pan_limit", 0)
+    if not pan_limit:
+        raise MCPError(
+            code="hardware_unsupported",
+            detail=(
+                f"Camera '{name}' does not support auto-follow (panLimit=0). "
+                "Auto-follow is only available on 360° indoor cameras (CAMERA_360)."
+            ),
+            camera=name,
+        )
+    try:
+        raw = br.get_autofollow(session, cam_info["id"])
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
+    return AutofollowConfig(enabled=bool(raw.get("result", False)))
+
+
+@mcp.tool()
+def bosch_camera_autofollow_set(camera: str, enabled: bool) -> AutofollowConfig:
+    """Enable or disable 360° auto-tracking for one camera.
+
+    Only available on 360° indoor cameras (``panLimit > 0``).
+    Raises ``hardware_unsupported`` for non-360° cameras.
+
+    API: PUT /v11/video_inputs/{id}/autofollow  Body: ``{"result": bool}``.
+    """
+    br = _bridge()
+    cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    pan_limit = cam_info.get("pan_limit", 0)
+    if not pan_limit:
+        raise MCPError(
+            code="hardware_unsupported",
+            detail=(
+                f"Camera '{name}' does not support auto-follow (panLimit=0). "
+                "Auto-follow is only available on 360° indoor cameras (CAMERA_360)."
+            ),
+            camera=name,
+        )
+    try:
+        br.set_autofollow(session, cam_info["id"], enabled=enabled)
+        raw = br.get_autofollow(session, cam_info["id"])
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
+    return AutofollowConfig(enabled=bool(raw.get("result", False)))
+
+
+@mcp.tool()
+def bosch_camera_privacy_sound_get(camera: str) -> PrivacySoundConfig:
+    """Get the privacy-sound indicator setting for one camera.
+
+    When enabled, the camera plays an audible indicator when privacy mode changes.
+    Returns ``{enabled}``.
+
+    API: GET /v11/video_inputs/{id}/privacy_sound_override.
+    """
+    br = _bridge()
+    cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    try:
+        raw = br.get_privacy_sound(session, cam_info["id"])
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
+    return PrivacySoundConfig(enabled=bool(raw.get("result", False)))
+
+
+@mcp.tool()
+def bosch_camera_privacy_sound_set(camera: str, enabled: bool) -> PrivacySoundConfig:
+    """Enable or disable the audible indicator that plays when privacy mode changes.
+
+    ``enabled=True``  → camera beeps/chimes when privacy is toggled.
+    ``enabled=False`` → silent privacy mode switching.
+
+    API: PUT /v11/video_inputs/{id}/privacy_sound_override  Body: ``{"result": bool}``.
+    """
+    br = _bridge()
+    cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    try:
+        br.set_privacy_sound(session, cam_info["id"], enabled=enabled)
+        raw = br.get_privacy_sound(session, cam_info["id"])
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
+    return PrivacySoundConfig(enabled=bool(raw.get("result", False)))
+
+
+@mcp.tool()
+def bosch_camera_unread_get(camera: str) -> UnreadCount:
+    """Get the unread event count for one camera.
+
+    Reads ``numberOfUnreadEvents`` from the ``/v11/video_inputs`` listing
+    (the ``/unread_events_count`` endpoint returns HTTP 404 — verified in testing).
+
+    Returns ``{camera, count}``.
+    """
+    br = _bridge()
+    cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    from .adapters.cli_bridge import CLOUD_API  # noqa: PLC0415
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    cam_id = cam_info["id"]
+
+    # Fetch from the video_inputs listing which contains numberOfUnreadEvents per cam
+    r = session.get(f"{CLOUD_API}/v11/video_inputs", timeout=15)
+    if r.status_code == 401:
+        raise MCPError(
+            code="reauth_required",
+            detail="API returned 401 fetching video_inputs for unread count.",
+        )
+    r.raise_for_status()
+
+    count = 0
+    for cam in r.json():
+        if cam.get("id") == cam_id:
+            count = int(cam.get("numberOfUnreadEvents", 0))
+            break
+
+    return UnreadCount(camera=name, count=count)
+
+
+@mcp.tool()
+def bosch_camera_health_check_all() -> list[CameraHealthEntry]:
+    """Bulk health check for ALL configured cameras in one call.
+
+    Returns status + WiFi signal + privacy mode + last event + unread count
+    for each camera. Replaces 4+ separate MCP calls for dashboard use.
+
+    Errors per camera are captured in the ``error`` field rather than raising,
+    so a single failing camera does not abort the entire check.
+    """
+    br = _bridge()
+    cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    import bosch_camera as bc  # type: ignore[import-not-found]
+    from .adapters.cli_bridge import CLOUD_API  # noqa: PLC0415
+
+    # Fetch the full /v11/video_inputs listing once for unread counts + status
+    listing_by_id: dict[str, dict] = {}
+    try:
+        r = session.get(f"{CLOUD_API}/v11/video_inputs", timeout=15)
+        if r.status_code == 200:
+            for cam in r.json():
+                cid = cam.get("id", "")
+                if cid:
+                    listing_by_id[cid] = cam
+    except Exception:
+        pass  # Best-effort; individual status calls will still work
+
+    results: list[CameraHealthEntry] = []
+    for name, cam_info in cameras.items():
+        cam_id = cam_info.get("id", "")
+        try:
+            # Status (online/offline)
+            status = bc.api_ping(session, cam_id) if cam_id else "UNKNOWN"
+
+            # Detail for privacy mode (may come from listing or dedicated call)
+            listing_entry = listing_by_id.get(cam_id, {})
+            privacy_raw = listing_entry.get("privacyMode", "")
+            if not privacy_raw:
+                detail = bc.api_get_camera(session, cam_id) or {}
+                privacy_raw = detail.get("privacyMode", "OFF")
+            privacy_mode = privacy_raw.upper() == "ON"
+
+            # WiFi (best-effort — some cameras may not support it)
+            wifi_rssi: Optional[int] = None
+            wifi_strength: Optional[int] = None
+            try:
+                wifi_raw = br.get_wifi_info(session, cam_id)
+                rssi_raw = wifi_raw.get("rssi") or wifi_raw.get("signalStrength")
+                if rssi_raw is not None:
+                    wifi_rssi = int(rssi_raw)
+                    wifi_strength = wifi_raw.get("signal_strength")
+            except Exception:
+                pass
+
+            # Last event (best-effort)
+            last_event_at: Optional[str] = None
+            try:
+                events = bc.api_get_events(session, cam_id, limit=1)
+                if events:
+                    ts_raw = events[0].get("timestamp", "")
+                    last_event_at = ts_raw[:19] if ts_raw else None
+            except Exception:
+                pass
+
+            # Unread count from listing
+            unread_count = int(listing_entry.get("numberOfUnreadEvents", 0))
+
+            results.append(CameraHealthEntry(
+                name=name,
+                status=status,
+                privacy_mode=privacy_mode,
+                wifi_rssi=wifi_rssi,
+                wifi_signal_strength=wifi_strength,
+                last_event_at=last_event_at,
+                unread_count=unread_count,
+            ))
+        except Exception as exc:
+            results.append(CameraHealthEntry(
+                name=name,
+                status="UNKNOWN",
+                privacy_mode=False,
+                error=str(exc),
+            ))
+
+    return results
+
+
+@mcp.tool()
+def bosch_camera_token_status() -> TokenStatus:
+    """Return the current bearer token validity, expiry, and account email.
+
+    Parses the JWT ``exp`` and ``email``/``preferred_username`` claims from the
+    stored bearer token without making a network call.
+
+    Returns ``{valid, expires_in_min, email}``.
+    ``valid=False`` when the token is expired or missing.
+    ``expires_in_min`` is negative when already expired.
+    """
+    import base64 as _b64
+    import json as _json_mod
+    import datetime as _dt
+
+    br = _bridge()
+    cfg, session, cameras = _get_session()
+
+    token = cfg.get("account", {}).get("bearer_token", "").strip()
+    if not token:
+        return TokenStatus(valid=False, expires_in_min=None, email=None)
+
+    try:
+        parts = token.split(".")
+        if len(parts) < 2:
+            return TokenStatus(valid=False, expires_in_min=None, email=None)
+        pad = len(parts[1]) % 4
+        info = _json_mod.loads(_b64.urlsafe_b64decode(parts[1] + "=" * pad))
+        exp = info.get("exp", 0)
+        email = info.get("email") or info.get("preferred_username")
+        if exp:
+            exp_dt = _dt.datetime.fromtimestamp(exp)
+            diff = exp_dt - _dt.datetime.now()
+            mins = int(diff.total_seconds() / 60)
+            return TokenStatus(valid=mins > 0, expires_in_min=mins, email=email)
+        return TokenStatus(valid=True, expires_in_min=None, email=email)
+    except Exception:
+        return TokenStatus(valid=False, expires_in_min=None, email=None)
 
 
 # ── Register resources + prompts ──────────────────────────────────────────────

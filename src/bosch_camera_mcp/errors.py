@@ -18,6 +18,7 @@ ErrorCode = Literal[
     "local_unavailable",
     "hardware_unsupported",
     "invalid_argument",
+    "privacy_blocked",
 ]
 
 

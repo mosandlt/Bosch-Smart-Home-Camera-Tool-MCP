@@ -29,9 +29,9 @@ from bosch_camera_mcp.server import (
 
 
 class TestVersion:
-    def test_version_is_v1_4_0(self) -> None:
-        """v1.4.0 — 4 new tools (MJPEG snapshot, ONVIF scopes, RCP version, cloud feature flags)."""
-        assert __version__ == "1.4.0"
+    def test_version_is_v1_6_0(self) -> None:
+        """v1.6.0 — motion, recording, autofollow, privacy_sound, unread, health_check_all, token_status."""
+        assert __version__ == "1.6.0"
 
 
 class TestServerApp:
