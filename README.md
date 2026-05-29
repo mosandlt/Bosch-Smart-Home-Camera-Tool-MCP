@@ -158,7 +158,7 @@ sequenceDiagram
 | `bosch_camera_maintenance_status` | Fetch current cloud maintenance announcement from community RSS feed | `{state, title, link, pub_date, summary, …, recommended_action}` |
 | `bosch_camera_audio_get` | Get microphone level, speaker level, intercom flag (Gen2 only) | `{microphone_level, speaker_level, intercom_enabled}` |
 | `bosch_camera_audio_set` | Set microphone level and/or speaker level 0-100 (Gen2 only) | `{microphone_level, speaker_level, intercom_enabled}` |
-| `bosch_camera_intrusion_get` | Get intrusion detection config: mode, sensitivity 0-7, distance 1-10 m (Gen2 only) | `{mode, sensitivity, distance}` |
+| `bosch_camera_intrusion_get` | Get intrusion detection config: mode, sensitivity 0-7, distance 1-8 m (Gen2 only) | `{mode, sensitivity, distance}` |
 | `bosch_camera_intrusion_set` | Update intrusion detection mode/sensitivity/distance (Gen2 only) | `{mode, sensitivity, distance}` |
 | `bosch_camera_wifi` | Get WiFi RSSI, SSID, and derived signal quality 0-100 % | `{rssi, ssid, signal_strength}` |
 | `bosch_camera_mjpeg_snapshot` | Direct LAN MJPEG snapshot via RTSP inst=3 (Gen2 only, ffmpeg, no cloud roundtrip) | `{path, method, timestamp, camera}` |

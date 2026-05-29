@@ -3,7 +3,7 @@
 Covers:
 - hardware_unsupported gate (Gen1 cameras without has_sound)
 - valid get/set round-trips for Gen2 cameras
-- range-boundary validation (mic/speaker 0-100, sensitivity 0-7, distance 1-10)
+- range-boundary validation (mic/speaker 0-100, sensitivity 0-7, distance 1-8)
 - no-op guard (at least one param required for _set tools)
 - WifiInfo RSSI → signal_strength mapping
 """
@@ -647,15 +647,15 @@ class TestIntrusionSet:
 
     @resp_lib.activate
     def test_intrusion_set_distance_out_of_range_raises(self) -> None:
-        """distance=11 is out of range."""
+        """distance=9 is out of range (max is 8)."""
         from bosch_camera_mcp.errors import MCPError
         from bosch_camera_mcp.server import bosch_camera_intrusion_set
 
         with pytest.raises(MCPError) as exc_info:
-            bosch_camera_intrusion_set(camera="Indoor", distance=11)
+            bosch_camera_intrusion_set(camera="Indoor", distance=9)
 
         assert exc_info.value.code == "invalid_argument"
-        assert "11" in exc_info.value.detail
+        assert "9" in exc_info.value.detail
 
 
 # ---------------------------------------------------------------------------

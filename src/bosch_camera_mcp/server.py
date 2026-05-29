@@ -120,7 +120,7 @@ class IntrusionConfig(BaseModel):
         default=None, description="Detection sensitivity (0-7; 0=low, 7=high)"
     )
     distance: Optional[int] = Field(
-        default=None, description="Detection distance in meters (1-10)"
+        default=None, description="Detection distance in meters (1-8)"
     )
 
 
