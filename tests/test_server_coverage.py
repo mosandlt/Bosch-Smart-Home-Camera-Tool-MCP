@@ -407,30 +407,28 @@ class TestFetchRcpLan:
 
     @pytest.mark.asyncio
     async def test_fetch_rcp_lan_non_200_returns_none(self) -> None:
-        """Non-200 HTTP response from RCP endpoint returns None (lines 1077-1081).
+        """Non-200 HTTP response from the RCP endpoint returns None.
 
-        Patches aiohttp.ClientSession to return a mock response with status 403.
+        Mocks httpx.AsyncClient — the helper uses httpx.DigestAuth (aiohttp has
+        no public DigestAuth class). Pinned to the RFC-5737 192.0.2.x range so
+        no real network call is attempted.
         """
-        import aiohttp
+        import httpx
+
         from bosch_camera_mcp.server import _fetch_rcp_lan  # type: ignore[attr-defined]
 
         mock_resp = MagicMock()
-        mock_resp.status = 403
-        mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
-        mock_resp.__aexit__ = AsyncMock(return_value=False)
+        mock_resp.status_code = 403
+        mock_resp.content = b""
 
-        mock_session_get = MagicMock()
-        mock_session_get.__aenter__ = AsyncMock(return_value=mock_resp)
-        mock_session_get.__aexit__ = AsyncMock(return_value=False)
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_resp)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        mock_session = MagicMock()
-        mock_session.get.return_value = mock_session_get
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=False)
-
-        with patch.object(aiohttp, "ClientSession", return_value=mock_session):
+        with patch.object(httpx, "AsyncClient", return_value=mock_client):
             result = await _fetch_rcp_lan(
-                "10.0.0.1",
+                "192.0.2.1",
                 "admin",
                 "secret",
                 "0xff00",

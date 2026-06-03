@@ -1,5 +1,16 @@
 # Changelog — Bosch Smart Home Camera MCP Server
 
+## [v1.5.2] - 2026-06-03
+
+### Dependencies
+
+- **Dropped `aiohttp` as a runtime dependency** — the v1.5.1 httpx migration removed its last usage in package code. It is now declared only under the `test` extra (a single regression test pins the original `aiohttp.DigestAuth` root cause via `hasattr`).
+- **Security floors for transitive deps** — `mcp` pulls in `pyjwt` (`>=2.10.1`) and `starlette` (`>=0.27`), whose older releases carry advisories. Added explicit floors `pyjwt>=2.13.0` (PYSEC-2026-175/177/178/179) and `starlette>=1.0.1` (PYSEC-2026-161) so the resolver always picks patched versions. `pip-audit` is clean. Mirrored in `requirements.txt` / `requirements-test.txt`.
+
+### Tests
+
+- Fixed `test_fetch_rcp_lan_non_200_returns_none` — it still mocked `aiohttp.ClientSession` (a stack the helper no longer uses after v1.5.1), so it neither exercised the non-200 branch nor avoided a real network attempt to a non-documentation IP (`10.0.0.1`). Rewritten to mock `httpx.AsyncClient` and pinned to RFC-5737 `192.0.2.x`.
+
 ## [v1.5.1] - 2026-06-03
 
 ### Bug fixes

@@ -29,9 +29,9 @@ from bosch_camera_mcp.server import (
 
 
 class TestVersion:
-    def test_version_is_v1_5_1(self) -> None:
-        """v1.5.1 — _fetch_rcp_lan httpx fix (LAN RCP READ) + coverage 83→98% + fixture sanitization + CI bump."""
-        assert __version__ == "1.5.1"
+    def test_version_is_v1_5_2(self) -> None:
+        """v1.5.2 — dependency hygiene: drop unused aiohttp runtime dep + pyjwt/starlette security floors + httpx test fix."""
+        assert __version__ == "1.5.2"
 
 
 class TestServerApp:

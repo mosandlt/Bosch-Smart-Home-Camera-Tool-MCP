@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bosch-smart-home-camera-mcp"
-version = "1.5.1"
+version = "1.5.2"
 description = "Model Context Protocol server for Bosch Smart Home cameras"
 readme = "README.md"
 license = { text = "MIT" }
@@ -28,8 +28,10 @@ dependencies = [
     "requests>=2.31",
     "urllib3>=2.0",
     "httpx>=0.27",
-    "aiohttp>=3.9",
     "defusedxml>=0.7.1",
+    # Transitive (pulled in by mcp) — pinned to patched releases for security:
+    "pyjwt>=2.13.0",     # PYSEC-2026-175/177/178/179
+    "starlette>=1.0.1",  # PYSEC-2026-161
 ]
 
 [project.optional-dependencies]
@@ -39,6 +41,7 @@ test = [
     "pytest-mock>=3.12",
     "responses>=0.25",
     "freezegun>=1.4",
+    "aiohttp>=3.9",  # regression tests only (pin the v1.5.1 aiohttp.DigestAuth root cause)
 ]
 
 [project.scripts]
