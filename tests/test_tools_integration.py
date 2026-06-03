@@ -46,7 +46,7 @@ _CFG = {
             "firmware": "3.0.0",
             "mac": "aa:bb:cc:dd:ee:01",
             "download_folder": "Garten",
-            "local_ip": "192.168.20.27",
+            "local_ip": "192.0.2.27",
             "local_username": "admin",
             "local_password": "secret123",
             "has_light": True,
@@ -351,8 +351,8 @@ class TestStreamUrl:
         from bosch_camera_mcp.server import bosch_camera_stream_url
 
         result = bosch_camera_stream_url(camera="Garten")
-        # Garten has local_ip 192.168.20.27 in test config
-        assert "192.168.20.27" in result.rtsps_url
+        # Garten has local_ip 192.0.2.27 in test config
+        assert "192.0.2.27" in result.rtsps_url
 
     def test_stream_url_missing_local_creds_raises_local_unavailable(self, patch_bosch_camera):
         """Camera without local_ip/credentials raises MCPError(local_unavailable)."""

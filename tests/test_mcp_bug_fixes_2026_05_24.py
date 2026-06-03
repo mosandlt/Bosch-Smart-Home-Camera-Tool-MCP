@@ -26,8 +26,8 @@ import pytest
 import requests as req_lib
 
 CLOUD_API = "https://residential.cbs.boschsecurity.com"
-CAM_ID_TERRASSE = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0"
-CAM_ID_KAMERA = "09ECD6E9-D2BF-42E1-8377-E316A180BAB9"
+CAM_ID_TERRASSE = "AABBCCDD-1111-4111-8111-AABBCCDD1111"
+CAM_ID_KAMERA = "CCDDEEFF-2222-4222-8222-CCDDEEFF2222"
 
 
 _VALID_TOKEN = (
@@ -47,7 +47,7 @@ def _cfg_stale() -> dict:
         },
         "cameras": {
             "Garten": {
-                "id": "732DB414-OLD-CACHED-ID",
+                "id": "33445566-OLD-CACHED-ID",
                 "name": "Garten",
                 "model": "OUTDOOR",
                 "firmware": "7.91.56",
@@ -80,7 +80,7 @@ _LIVE_VIDEO_INPUTS = [
         "title": "Terrasse",
         "hardwareVersion": "HOME_Eyes_Outdoor",
         "firmwareVersion": "9.40.102",
-        "macAddress": "64-da-a0-33-14-ae",
+        "macAddress": "aa-bb-cc-00-11-22",
         "privacyMode": "OFF",
         "connectionStatus": "ONLINE",
         "featureSupport": {"sound": True, "light": True, "panLimit": 0},
@@ -91,18 +91,18 @@ _LIVE_VIDEO_INPUTS = [
         "title": "Kamera",
         "hardwareVersion": "INDOOR",
         "firmwareVersion": "7.91.56",
-        "macAddress": "64-da-a0-08-36-27",
+        "macAddress": "aa-bb-cc-00-11-33",
         "privacyMode": "OFF",
         "connectionStatus": "OFFLINE",
         "featureSupport": {"sound": False, "light": False, "panLimit": 120},
         "featureStatus": {},
     },
     {
-        "id": "732DB414-BD88-4CEE-AA2E-0DC5CC733C5E",
+        "id": "33445566-3333-4333-8333-334455663333",
         "title": "Haustüre",
         "hardwareVersion": "OUTDOOR",
         "firmwareVersion": "7.91.56",
-        "macAddress": "64-da-a0-09-eb-6e",
+        "macAddress": "aa-bb-cc-00-11-44",
         "privacyMode": "ON",
         "connectionStatus": "OFFLINE",
         "featureSupport": {"sound": False, "light": True, "panLimit": 0},

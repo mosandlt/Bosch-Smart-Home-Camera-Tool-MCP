@@ -15,8 +15,8 @@ import pytest
 import requests as req_lib
 
 CLOUD_API = "https://residential.cbs.boschsecurity.com"
-CAM_ID_TERRASSE = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0"
-CAM_ID_KAMERA = "09ECD6E9-D2BF-42E1-8377-E316A180BAB9"
+CAM_ID_TERRASSE = "AABBCCDD-1111-4111-8111-AABBCCDD1111"
+CAM_ID_KAMERA = "CCDDEEFF-2222-4222-8222-CCDDEEFF2222"
 
 _VALID_TOKEN = (
     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
@@ -30,7 +30,7 @@ _LIVE_VIDEO_INPUTS = [
         "title": "Terrasse",
         "hardwareVersion": "HOME_Eyes_Outdoor",
         "firmwareVersion": "9.40.102",
-        "macAddress": "64-da-a0-33-14-ae",
+        "macAddress": "aa-bb-cc-00-11-22",
         "privacyMode": "OFF",
         "connectionStatus": "ONLINE",
         "featureSupport": {"sound": True, "light": True, "panLimit": 0},
@@ -41,7 +41,7 @@ _LIVE_VIDEO_INPUTS = [
         "title": "Kamera",
         "hardwareVersion": "INDOOR",
         "firmwareVersion": "7.91.56",
-        "macAddress": "64-da-a0-08-36-27",
+        "macAddress": "aa-bb-cc-00-11-33",
         "privacyMode": "OFF",
         "connectionStatus": "OFFLINE",
         "featureSupport": {"sound": False, "light": False, "panLimit": 120},
@@ -63,8 +63,8 @@ def _cfg() -> dict[str, Any]:
                 "name": "Terrasse",
                 "model": "HOME_Eyes_Outdoor",
                 "firmware": "9.40.102",
-                "mac": "64-da-a0-33-14-ae",
-                "local_ip": "192.168.20.149",
+                "mac": "aa-bb-cc-00-11-22",
+                "local_ip": "192.0.2.149",
                 "local_username": "testuser",
                 "local_password": "testpass",
                 "download_folder": "Terrasse",
@@ -74,7 +74,7 @@ def _cfg() -> dict[str, Any]:
                 "name": "Kamera",
                 "model": "INDOOR",
                 "firmware": "7.91.56",
-                "mac": "64-da-a0-08-36-27",
+                "mac": "aa-bb-cc-00-11-33",
                 "local_ip": "",
                 "local_username": "",
                 "local_password": "",
@@ -152,7 +152,7 @@ def test_fetch_rcp_lan_returns_bytes_on_200() -> None:
             "bosch_camera_mcp.server._fetch_rcp_lan",
             new=AsyncMock(return_value=expected),
         ) as m:
-            result = await m("192.168.20.149", "u", "p", "0xff00")
+            result = await m("192.0.2.149", "u", "p", "0xff00")
         return result
 
     result = asyncio.run(_run())
@@ -160,37 +160,41 @@ def test_fetch_rcp_lan_returns_bytes_on_200() -> None:
 
 
 def test_fetch_rcp_lan_returns_none_on_401() -> None:
-    """_fetch_rcp_lan returns None when camera responds 401."""
+    """_fetch_rcp_lan returns None when camera responds 401.
+
+    Mocks httpx.AsyncClient (not aiohttp): the helper uses httpx.DigestAuth —
+    aiohttp has no public DigestAuth class. See test_fetch_rcp_lan_httpx.py.
+    """
     from bosch_camera_mcp.server import _fetch_rcp_lan
 
-    mock_resp = AsyncMock()
-    mock_resp.status = 401
-    mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
-    mock_resp.__aexit__ = AsyncMock(return_value=False)
+    mock_resp = MagicMock()
+    mock_resp.status_code = 401
+    mock_resp.content = b""
 
-    mock_session = AsyncMock()
-    mock_session.get = MagicMock(return_value=mock_resp)
-    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-    mock_session.__aexit__ = AsyncMock(return_value=False)
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(return_value=mock_resp)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
 
-    with patch("aiohttp.ClientSession", return_value=mock_session):
-        result = asyncio.run(_fetch_rcp_lan("192.168.20.149", "u", "p", "0xff00"))
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        result = asyncio.run(_fetch_rcp_lan("192.0.2.149", "u", "p", "0xff00"))
 
     assert result is None
 
 
 def test_fetch_rcp_lan_returns_none_on_network_error() -> None:
     """_fetch_rcp_lan swallows network exceptions and returns None."""
-    import aiohttp
+    import httpx
+
     from bosch_camera_mcp.server import _fetch_rcp_lan
 
-    mock_session = AsyncMock()
-    mock_session.get = MagicMock(side_effect=aiohttp.ClientError("timeout"))
-    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-    mock_session.__aexit__ = AsyncMock(return_value=False)
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(side_effect=httpx.ConnectError("timeout"))
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
 
-    with patch("aiohttp.ClientSession", return_value=mock_session):
-        result = asyncio.run(_fetch_rcp_lan("192.168.20.149", "u", "p", "ff00"))
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        result = asyncio.run(_fetch_rcp_lan("192.0.2.149", "u", "p", "ff00"))
 
     assert result is None
 

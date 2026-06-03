@@ -19,7 +19,6 @@ import asyncio
 import datetime
 import logging
 import os
-import ssl
 import sys
 from pathlib import Path
 from typing import Any, Optional
@@ -271,7 +270,6 @@ def _build_status(
 @mcp.tool()
 def bosch_camera_list() -> list[CameraSummary]:
     """List all configured Bosch cameras with their online status."""
-    br = _bridge()
     cfg, session, cameras = _get_session()
 
     import bosch_camera as bc  # type: ignore[import-not-found]
@@ -1042,14 +1040,20 @@ async def _fetch_rcp_lan(
 ) -> Optional[bytes]:
     """Send a READ RCP request to the camera's LAN HTTPS endpoint.
 
-    Uses aiohttp with Digest auth and TLS verify disabled (cameras use
+    Uses httpx with Digest auth and TLS verify disabled (cameras use
     self-signed certs). Returns the raw response body bytes on HTTP 200,
     or None on any error (network, auth, non-200).
+
+    httpx (not aiohttp) is the digest stack here: aiohttp exposes no public
+    ``DigestAuth`` class (only ``DigestAuthMiddleware``), so the previous
+    ``aiohttp.DigestAuth`` always raised AttributeError and the broad
+    ``except`` silently returned None — this READ path never worked in
+    production. The sibling lan_rcp.py module already uses ``httpx.DigestAuth``.
 
     Used by bosch_camera_onvif_scopes (0x0a98) and bosch_camera_rcp_version
     (0xff00 / 0xff04). Pass opcode_hex with or without leading "0x".
     """
-    import aiohttp
+    import httpx
 
     if not opcode_hex.lower().startswith("0x"):
         opcode_hex = "0x" + opcode_hex
@@ -1060,25 +1064,23 @@ async def _fetch_rcp_lan(
         "direction": "READ",
         "type": "P_OCTET",
     }
-    ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    ssl_ctx.check_hostname = False
-    ssl_ctx.verify_mode = ssl.CERT_NONE
     try:
-        auth = aiohttp.DigestAuth(login=user, password=password)
-        async with aiohttp.ClientSession(auth=auth) as session:
-            async with session.get(
-                url,
-                params=params,
-                ssl=ssl_ctx,
-                timeout=aiohttp.ClientTimeout(total=5.0),
-            ) as resp:
-                if resp.status == 200:
-                    return await resp.read()
-                logger.debug(
-                    "_fetch_rcp_lan: %s@%s opcode=%s HTTP %d",
-                    opcode_hex, cam_ip, opcode_hex, resp.status,
-                )
-                return None
+        auth = httpx.DigestAuth(user, password)
+        async with httpx.AsyncClient(  # noqa: S501 — self-signed cam cert
+            verify=False,
+            timeout=httpx.Timeout(5.0),
+            auth=auth,
+        ) as client:
+            resp = await client.get(url, params=params)
+            if resp.status_code == 200:
+                return bytes(resp.content)
+            logger.debug(
+                "_fetch_rcp_lan: %s@%s HTTP %d",
+                opcode_hex,
+                cam_ip,
+                resp.status_code,
+            )
+            return None
     except Exception as exc:  # noqa: BLE001 — best-effort
         logger.debug("_fetch_rcp_lan: %s@%s error: %s", opcode_hex, cam_ip, exc)
         return None
@@ -1722,7 +1724,6 @@ def bosch_camera_token_status() -> TokenStatus:
     import json as _json_mod
     import datetime as _dt
 
-    br = _bridge()
     cfg, session, cameras = _get_session()
 
     token = cfg.get("account", {}).get("bearer_token", "").strip()

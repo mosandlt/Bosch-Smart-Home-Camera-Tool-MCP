@@ -212,7 +212,7 @@ def _resolve_cam(cameras: dict, key: str) -> tuple[str, dict]:
 
     if key in cameras:
         return key, cameras[key]
-    # UUID lookup — Bosch ids look like EF791764-A48D-4F00-9B32-EF04BEB0DDA0.
+    # UUID lookup — Bosch ids look like AABBCCDD-1111-4111-8111-AABBCCDD1111.
     # Case-insensitive because Bosch sometimes hands them back lowercased.
     key_lower = key.lower()
     for cam_name, info in cameras.items():

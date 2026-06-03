@@ -1,5 +1,19 @@
 # Changelog — Bosch Smart Home Camera MCP Server
 
+## [v1.5.1] - 2026-06-03
+
+### Bug fixes
+
+- **`_fetch_rcp_lan` (LAN RCP READ) never worked** — the helper used `aiohttp.DigestAuth`, which does not exist (aiohttp exposes only `DigestAuthMiddleware`, never a public `DigestAuth` class). The `auth = aiohttp.DigestAuth(...)` line raised `AttributeError` on every call; the broad `except Exception` swallowed it and returned `None`. As a result the two tools that depend on this READ path — **`bosch_camera_onvif_scopes`** (RCP 0x0a98) and **`bosch_camera_rcp_version`** (0xff00 / 0xff04) — always failed with a misleading `local_unavailable` "camera may be offline or credentials invalid" error, even on a reachable camera with valid LAN credentials. Now uses `httpx.DigestAuth`, mirroring the working sibling module `lan_rcp.py`. The unused `aiohttp` / `ssl` imports were dropped. Bug was MCP-only (Python CLI uses `requests.HTTPDigestAuth`, HA uses `urllib HTTPDigestAuthHandler`, both correct).
+
+### Internal
+
+- **Test coverage 83% → 98%** — added targeted tests for `cli_bridge.py` (67→93%), `server.py` (88→99%), `lan_rcp.py` (77→99%), `resources.py` (80→97%), `maintenance.py` (97→100%). The remaining uncovered lines are `return …  # unreachable` sentinels after `_raise_api_error` (which always raises) and a `__main__` guard.
+- Two existing `_fetch_rcp_lan` tests in `test_mcp_features_2026_05_25.py` were mocking `aiohttp.ClientSession` — a library the helper never reached (the `DigestAuth` AttributeError fired first), so they only ever passed *because* of the bug. After the fix they would have made real network calls to a live camera IP; rewritten to mock `httpx.AsyncClient` and pinned to the RFC-5737 `192.0.2.0/24` documentation range.
+- Cleaned pre-existing ruff findings in touched files (unused `br = _bridge()` assignments, missing `Optional` import, dead locals).
+- **Test fixtures sanitized** — replaced real device identifiers (cloud IDs, MAC addresses, LAN IPs) across the test suite with fake values (RFC-5737 `192.0.2.x`, `aa:bb:cc` MACs, `AABBCCDD-…` UUIDs). Project rule: fixtures use fake IDs only.
+- **CI bumped to Node-24-native action majors** — `actions/checkout` v4→v6, `actions/setup-python` v5→v6, `actions/upload-artifact` v4→v7, `actions/download-artifact` v4→v8, ahead of GitHub's 2026-06-16 forced-Node-24 cutover.
+
 ## [v1.5.0] - 2026-05-28
 
 **11 new tools + 8 bugfixes from a live-camera audit (4 hardware units, all 4 generations exercised) plus a same-day follow-up that resolved the intrusion mode field-name mystery.**
@@ -26,7 +40,7 @@
 
 ### Internal
 
-- Pre-existing test failure `test_intrusion_set_distance_boundary_max` (asserts `distance=10` is accepted) is now an intentional reject — needs test update next release.
+- `test_intrusion_set_distance_boundary_max` updated to assert `distance=8` as the valid upper boundary and `distance=9` as an out-of-range reject (post-release fixup, commit `1cb87df`).
 - 30 new tests in `tests/test_v160_features.py` exercising every new tool's happy path + hardware gates + privacy-blocked wrap.
 
 ## [v1.4.0] - 2026-05-25
