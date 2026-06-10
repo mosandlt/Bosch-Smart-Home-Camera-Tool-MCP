@@ -17,21 +17,29 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from types import ModuleType
+from typing import TYPE_CHECKING
+
 from .errors import MCPError
 from .server import mcp
+
+if TYPE_CHECKING:
+    import requests
 
 logger = logging.getLogger("bosch_camera_mcp.resources")
 
 
-def _bridge():
+def _bridge() -> ModuleType:
     from .adapters import cli_bridge  # noqa: PLC0415
 
     return cli_bridge
 
 
-def _get_session(config_path: str | None = None):
+def _get_session(
+    config_path: str | None = None,
+) -> tuple[dict[str, Any], requests.Session, dict[str, dict[str, Any]]]:
     br = _bridge()
-    return br.get_session_and_cameras(config_path)
+    return br.get_session_and_cameras(config_path)  # type: ignore[no-any-return]
 
 
 # ── bosch://cameras ───────────────────────────────────────────────────────────
@@ -52,7 +60,7 @@ def cameras_list() -> str:
             raise MCPError(code="auth_expired", detail=exc.detail)
         raise
 
-    import bosch_camera as bc  # type: ignore[import-not-found]
+    import bosch_camera as bc
 
     result: list[dict[str, Any]] = []
     for name, cam_info in cameras.items():
@@ -95,7 +103,7 @@ def camera_snapshot(name: str) -> bytes:
     canonical_name, _cam_info = br._resolve_cam(cameras, name)
     safe_name = canonical_name.replace(" ", "_")
     cache_dir = (
-        Path.home() / ".cache" / "bosch-camera-mcp" / "snapshots" / safe_name
+        Path.home() / ".cache" / "bosch-camera-mcp" / "snapshots" / str(safe_name)
     )
 
     # Try cache hit first
@@ -136,7 +144,7 @@ def camera_events(name: str) -> str:
     canonical_name, cam_info = br._resolve_cam(cameras, name)
     cam_id = cam_info["id"]
 
-    import bosch_camera as bc  # type: ignore[import-not-found]
+    import bosch_camera as bc
 
     raw_events = bc.api_get_events(session, cam_id, limit=50)
     normalized: list[dict[str, Any]] = []

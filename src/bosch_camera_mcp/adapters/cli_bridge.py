@@ -16,7 +16,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import requests
 
@@ -63,7 +63,7 @@ def ensure_cli_importable() -> None:
 
 def get_session_and_cameras(
     config_path: Optional[str] = None,
-) -> tuple[dict, requests.Session, dict[str, dict]]:
+) -> tuple[dict[str, Any], requests.Session, dict[str, dict[str, Any]]]:
     """Load config, check/refresh token, build session, load camera registry.
 
     Args:
@@ -83,7 +83,7 @@ def get_session_and_cameras(
 
     ensure_cli_importable()
 
-    import bosch_camera as bc  # type: ignore[import-not-found]
+    import bosch_camera as bc
 
     # If a custom config path is requested we temporarily patch CONFIG_FILE.
     # The CLI stores it as a module-level constant derived from __file__ which
@@ -92,7 +92,7 @@ def get_session_and_cameras(
         import json
 
         with open(config_path) as fh:
-            cfg: dict = json.load(fh)
+            cfg: dict[str, Any] = json.load(fh)
         # Merge defaults so forward-compat keys are present
         bc._merge_defaults(cfg, bc.DEFAULT_CONFIG)
     else:
@@ -117,7 +117,7 @@ def get_session_and_cameras(
         renewed = False
         if refresh:
             try:
-                from get_token import _do_refresh  # type: ignore[import-not-found]
+                from get_token import _do_refresh
 
                 tokens = _do_refresh(refresh)
                 if tokens:
@@ -156,7 +156,7 @@ def get_session_and_cameras(
     # API when `cached` was empty, which caused stale local config to mask
     # camera renames and new additions. Local-only fields (local_ip / creds)
     # are preserved by ID across refresh.
-    cameras: dict[str, dict] = {}
+    cameras: dict[str, dict[str, Any]] = {}
     try:
         r = session.get(f"{CLOUD_API}/v11/video_inputs", timeout=15)
         if r.status_code == 401:
@@ -203,7 +203,7 @@ def get_session_and_cameras(
     return cfg, session, cameras
 
 
-def _resolve_cam(cameras: dict, key: str) -> tuple[str, dict]:
+def _resolve_cam(cameras: dict[str, dict[str, Any]], key: str) -> tuple[str, dict[str, Any]]:
     """Resolve a partial camera name → (canonical_name, cam_info).
 
     Raises MCPError("unknown_camera") when no unambiguous match is found.
@@ -301,7 +301,7 @@ PAN_PRESET_MAP: dict[str, int] = {
 }
 
 
-def set_pan(session: requests.Session, cam_id: str, direction: str) -> dict:
+def set_pan(session: requests.Session, cam_id: str, direction: str) -> dict[str, Any]:
     """PUT /v11/video_inputs/{cam_id}/pan → move camera to target position.
 
     Args:
@@ -360,7 +360,7 @@ def set_pan(session: requests.Session, cam_id: str, direction: str) -> dict:
         timeout=15,
     )
     if r.status_code == 200:
-        return r.json()
+        return r.json()  # type: ignore[no-any-return]
     _raise_api_error(r, f"set_pan({cam_id}, {direction})")
     return {}  # unreachable
 
@@ -389,7 +389,7 @@ def set_notifications(
     return False
 
 
-def get_audio(session: requests.Session, cam_id: str) -> dict:
+def get_audio(session: requests.Session, cam_id: str) -> dict[str, Any]:
     """GET /v11/video_inputs/{cam_id}/audio → {microphoneLevel, speakerLevel, ...}.
 
     Returns the raw JSON dict from the API.
@@ -439,7 +439,7 @@ def set_audio(
     return False  # unreachable
 
 
-def get_intrusion_config(session: requests.Session, cam_id: str) -> dict:
+def get_intrusion_config(session: requests.Session, cam_id: str) -> dict[str, Any]:
     """GET /v11/video_inputs/{cam_id}/intrusionDetectionConfig.
 
     Returns raw JSON dict with at least {mode, sensitivity, distance}.
@@ -475,7 +475,7 @@ def trigger_siren(
     # has not been identified yet; for now only Gen2 Indoor II is supported.
     if model == "HOME_Eyes_Indoor":
         url = f"{CLOUD_API}/v11/video_inputs/{cam_id}/panic_alarm"
-        body: dict = {"status": "OFF" if stop else "ON"}
+        body: dict[str, Any] = {"status": "OFF" if stop else "ON"}
     else:
         raise ValueError(
             f"trigger_siren: unsupported camera model '{model}'. "
@@ -540,7 +540,7 @@ def set_intrusion_config(
     return False  # unreachable
 
 
-def get_wifi_info(session: requests.Session, cam_id: str) -> dict:
+def get_wifi_info(session: requests.Session, cam_id: str) -> dict[str, Any]:
     """GET /v11/video_inputs/{cam_id}/wifiinfo.
 
     Returns {rssi, ssid, ...} with a synthesised signal_strength (0-100).
@@ -569,7 +569,7 @@ def get_wifi_info(session: requests.Session, cam_id: str) -> dict:
     return {}  # unreachable
 
 
-def get_motion_config(session: requests.Session, cam_id: str) -> dict:
+def get_motion_config(session: requests.Session, cam_id: str) -> dict[str, Any]:
     """GET /v11/video_inputs/{cam_id}/motion.
 
     Returns {enabled, motionAlarmConfiguration (= sensitivity string), ...}.
@@ -619,7 +619,7 @@ def set_motion_config(
     return False  # unreachable
 
 
-def get_recording_options(session: requests.Session, cam_id: str) -> dict:
+def get_recording_options(session: requests.Session, cam_id: str) -> dict[str, Any]:
     """GET /v11/video_inputs/{cam_id}/recording_options.
 
     Returns {recordSound: bool, ...}.
@@ -654,7 +654,7 @@ def set_recording_options(
     return False  # unreachable
 
 
-def get_autofollow(session: requests.Session, cam_id: str) -> dict:
+def get_autofollow(session: requests.Session, cam_id: str) -> dict[str, Any]:
     """GET /v11/video_inputs/{cam_id}/autofollow.
 
     Returns {result: bool}.
@@ -691,7 +691,7 @@ def set_autofollow(
     return False  # unreachable
 
 
-def get_privacy_sound(session: requests.Session, cam_id: str) -> dict:
+def get_privacy_sound(session: requests.Session, cam_id: str) -> dict[str, Any]:
     """GET /v11/video_inputs/{cam_id}/privacy_sound_override.
 
     Returns {result: bool} — True means audible indicator is on.

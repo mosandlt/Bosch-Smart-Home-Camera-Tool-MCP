@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import sys
 from typing import Any
-from unittest.mock import ANY, AsyncMock, MagicMock, call, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 

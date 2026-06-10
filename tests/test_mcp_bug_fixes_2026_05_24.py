@@ -19,7 +19,6 @@ Each test PINs the post-fix behavior. Run order: red before fix, green after.
 from __future__ import annotations
 
 import sys
-from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -176,7 +175,6 @@ def patch_env(monkeypatch: pytest.MonkeyPatch, stale_cfg: dict):
     monkeypatch.setitem(sys.modules, "bosch_i18n", MagicMock())
 
     import bosch_camera_mcp.adapters.cli_bridge as bridge
-    import bosch_camera_mcp.server as srv
 
     monkeypatch.setattr(bridge, "ensure_cli_importable", lambda: None)
 

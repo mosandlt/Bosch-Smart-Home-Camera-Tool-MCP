@@ -315,7 +315,7 @@ class TestPreferLocalPrivacySet:
         ):
             from bosch_camera_mcp.server import bosch_camera_privacy_set
 
-            result = await bosch_camera_privacy_set(
+            await bosch_camera_privacy_set(
                 camera="Garten", enabled=True, prefer_local=False
             )
 
@@ -337,7 +337,7 @@ class TestPreferLocalPrivacySet:
         ):
             from bosch_camera_mcp.server import bosch_camera_privacy_set
 
-            result = await bosch_camera_privacy_set(
+            await bosch_camera_privacy_set(
                 camera="Innen", enabled=True, prefer_local=True
             )
 
@@ -365,7 +365,7 @@ class TestPreferLocalLightSet:
         ):
             from bosch_camera_mcp.server import bosch_camera_light_set
 
-            result = await bosch_camera_light_set(
+            await bosch_camera_light_set(
                 camera="Garten", enabled=True, prefer_local=True
             )
 
@@ -387,7 +387,7 @@ class TestPreferLocalLightSet:
         ):
             from bosch_camera_mcp.server import bosch_camera_light_set
 
-            result = await bosch_camera_light_set(
+            await bosch_camera_light_set(
                 camera="Garten", enabled=False, prefer_local=True
             )
 
@@ -410,7 +410,7 @@ class TestPreferLocalLightSet:
         ):
             from bosch_camera_mcp.server import bosch_camera_light_set
 
-            result = await bosch_camera_light_set(
+            await bosch_camera_light_set(
                 camera="Garten", enabled=True, prefer_local=True
             )
 
@@ -431,7 +431,7 @@ class TestPreferLocalLightSet:
         ):
             from bosch_camera_mcp.server import bosch_camera_light_set
 
-            result = await bosch_camera_light_set(
+            await bosch_camera_light_set(
                 camera="Garten", enabled=True, prefer_local=False
             )
 

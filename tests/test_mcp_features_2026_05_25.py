@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from typing import Any
+from typing import Any, Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -140,7 +140,6 @@ def patch_env(monkeypatch: pytest.MonkeyPatch, base_cfg: dict[str, Any]):
 
 def test_fetch_rcp_lan_returns_bytes_on_200() -> None:
     """_fetch_rcp_lan returns raw bytes when the RCP call succeeds."""
-    from bosch_camera_mcp.server import _fetch_rcp_lan
 
     # Test via the onvif_scopes path — patch _fetch_rcp_lan directly
     # to validate the helper contract rather than mock aiohttp internals.
@@ -267,7 +266,7 @@ def test_mjpeg_snapshot_ffmpeg_success(tmp_path) -> None:
 
         async def _communicate():
             # Create the output file to simulate ffmpeg writing it
-            out_arg = args[0]
+            args[0]
             # find the output file path (last positional arg before kwargs)
             # The tool builds out_path and passes str(out_path) as last arg
             return b"", b"frame=1 fps=0 ..."

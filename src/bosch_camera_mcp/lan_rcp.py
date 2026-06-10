@@ -57,7 +57,7 @@ def _fetch_fingerprint_sync(host: str, port: int = 443, timeout: float = 3.0) ->
     try:
         with socket.create_connection((host, port), timeout=timeout) as raw:
             with ctx.wrap_socket(raw, server_hostname=host) as tls:
-                der: bytes = tls.getpeercert(binary_form=True)
+                der = tls.getpeercert(binary_form=True)
                 if not der:
                     raise CertPinningError(f"No certificate from {host}:{port}")
                 return hashlib.sha256(der).hexdigest()

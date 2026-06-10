@@ -36,7 +36,7 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -493,7 +493,7 @@ class TestRefreshLocalCreds:
             with patch.object(fake_session, "put", return_value=mock_resp):
                 from bosch_camera_mcp.lan_rcp import refresh_local_creds
 
-                result = await refresh_local_creds(
+                await refresh_local_creds(
                     cam_id=CAM_ID_1,
                     session=fake_session,
                     cfg=cfg,

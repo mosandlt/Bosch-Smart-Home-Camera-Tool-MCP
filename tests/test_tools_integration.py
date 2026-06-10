@@ -9,8 +9,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 import responses as resp_lib
@@ -641,7 +640,7 @@ class TestPan:
         import requests as req_lib
 
         s = req_lib.Session()
-        result = set_pan(s, CAM_ID_2, "center")
+        set_pan(s, CAM_ID_2, "center")
         put_body = json.loads(
             next(c for c in resp_lib.calls if c.request.method == "PUT").request.body
         )
@@ -782,7 +781,7 @@ class TestAuthExpired:
             import importlib
 
             # Re-import bridge to get fresh module state
-            bridge_mod = importlib.import_module(
+            importlib.import_module(
                 "bosch_camera_mcp.adapters.cli_bridge"
             )
             # Directly test the MCPError path: no token + near_expiry → reauth_required

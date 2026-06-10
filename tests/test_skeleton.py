@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import inspect
 
-import pytest
 
 from bosch_camera_mcp import __version__
 from bosch_camera_mcp.server import (

@@ -5,7 +5,6 @@ Prompts are pure instruction templates — no API calls, no mocks needed.
 
 from __future__ import annotations
 
-import pytest
 
 
 # ---------------------------------------------------------------------------

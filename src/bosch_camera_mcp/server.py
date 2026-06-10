@@ -1,6 +1,6 @@
-"""MCP server entrypoint — v1.6.0.
+"""MCP server entrypoint.
 
-All 8 tool bodies are now wired to the sister CLI's bosch_camera.py via
+Tool bodies are wired to the sister CLI's bosch_camera.py via
 bosch_camera_mcp.adapters.cli_bridge (Option C: sys.path injection).
 Resources and prompts are registered by importing resources.py / prompts.py
 at the bottom of this module (the @mcp.resource / @mcp.prompt decorators
@@ -17,11 +17,18 @@ from __future__ import annotations
 import argparse
 import asyncio
 import datetime
+import functools
 import logging
 import os
 import sys
+import threading
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Optional
+from types import ModuleType
+from typing import TYPE_CHECKING, Any, Optional, ParamSpec, TypeVar
+
+if TYPE_CHECKING:
+    import requests
 
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, Field
@@ -206,28 +213,65 @@ class TokenStatus(BaseModel):
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
-def _bridge():
+# All cloud-backed tool bodies share the bridge's requests.Session, which is not
+# safe under concurrent multi-threaded use (cookie jar / token refresh races), so
+# the offloaded bodies are serialized behind one lock.
+_BLOCKING_TOOL_LOCK = threading.Lock()
+
+
+def _locked(fn: Callable[_P, _R], /, *args: _P.args, **kwargs: _P.kwargs) -> _R:
+    """Run *fn* while holding the shared blocking-tool lock."""
+    with _BLOCKING_TOOL_LOCK:
+        return fn(*args, **kwargs)
+
+
+def _blocking_tool(fn: Callable[_P, _R]) -> Callable[_P, _R]:
+    """Register a blocking (requests-based) tool body without stalling the event loop.
+
+    FastMCP executes sync tool functions directly on the event-loop thread
+    (mcp 1.27.2 func_metadata.py: ``return fn(**arguments_parsed_dict)``), so a
+    blocking HTTP call inside a sync tool freezes the whole server for every
+    parallel client. This decorator registers an *async* wrapper that offloads
+    the body via ``asyncio.to_thread``; ``functools.wraps`` preserves name,
+    docstring and signature (FastMCP introspects through ``__wrapped__``), so
+    the published tool schema is unchanged. The module-level name keeps
+    pointing at the plain sync function for direct in-process calls.
+    """
+
+    @functools.wraps(fn)
+    async def _async_tool(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        return await asyncio.to_thread(_locked, fn, *args, **kwargs)
+
+    mcp.tool()(_async_tool)
+    return fn
+
+
+def _bridge() -> ModuleType:
     """Lazy import of the bridge module (keeps import errors at call-time)."""
     from .adapters import cli_bridge  # noqa: PLC0415
 
     return cli_bridge
 
 
-def _get_session(config_path: Optional[str] = None):
+def _get_session(
+    config_path: Optional[str] = None,
+) -> tuple[dict[str, Any], requests.Session, dict[str, dict[str, Any]]]:
     """Return (cfg, session, cameras_dict); wraps reauth_required into MCPError."""
     br = _bridge()
-    return br.get_session_and_cameras(config_path or _CONFIG_PATH)
+    return br.get_session_and_cameras(config_path or _CONFIG_PATH)  # type: ignore[no-any-return]
 
 
 def _build_status(
     name: str,
-    cam_info: dict,
-    session,
-    cfg: dict,
+    cam_info: dict[str, Any],
+    session: requests.Session,
+    cfg: dict[str, Any],
 ) -> CameraStatus:
     """Build a CameraStatus model for one camera."""
-    import bosch_camera as bc  # type: ignore[import-not-found]
+    import bosch_camera as bc
 
     cam_id = cam_info["id"]
 
@@ -267,12 +311,12 @@ def _build_status(
 # ── Tools ─────────────────────────────────────────────────────────────────────
 
 
-@mcp.tool()
+@_blocking_tool
 def bosch_camera_list() -> list[CameraSummary]:
     """List all configured Bosch cameras with their online status."""
     cfg, session, cameras = _get_session()
 
-    import bosch_camera as bc  # type: ignore[import-not-found]
+    import bosch_camera as bc
 
     result: list[CameraSummary] = []
     for name, cam_info in cameras.items():
@@ -320,7 +364,7 @@ def _camera_generation(model: str) -> str:
     return "Gen2" if model.startswith("HOME_") else "Gen1"
 
 
-def _require_gen2(cam_info: dict, name: str, feature: str) -> None:
+def _require_gen2(cam_info: dict[str, Any], name: str, feature: str) -> None:
     """Raise hardware_unsupported for Gen1 cams attempting a Gen2-only feature.
 
     Source of truth is hardwareVersion (stored as ``model`` in cam_info) — the
@@ -339,7 +383,7 @@ def _require_gen2(cam_info: dict, name: str, feature: str) -> None:
         )
 
 
-@mcp.tool()
+@_blocking_tool
 def bosch_camera_status(camera: str) -> CameraStatus:
     """Get the current status of one camera by name (case-insensitive)."""
     br = _bridge()
@@ -350,7 +394,7 @@ def bosch_camera_status(camera: str) -> CameraStatus:
     return _build_status(name, cam_info, session, cfg)
 
 
-@mcp.tool()
+@_blocking_tool
 def bosch_camera_snapshot(camera: str) -> SnapshotResult:
     """Capture a fresh snapshot via LAN only (HTTP Digest to camera IP). No Bosch cloud roundtrip.
 
@@ -361,7 +405,7 @@ def bosch_camera_snapshot(camera: str) -> SnapshotResult:
     cfg, session, cameras = _get_session()
     br.ensure_cli_importable()
 
-    import bosch_camera as bc  # type: ignore[import-not-found]
+    import bosch_camera as bc
 
     name, cam_info = br._resolve_cam(cameras, camera)
 
@@ -404,7 +448,7 @@ def bosch_camera_snapshot(camera: str) -> SnapshotResult:
     )
 
 
-@mcp.tool()
+@_blocking_tool
 def bosch_camera_stream_url(camera: str) -> StreamUrlResult:
     """Get the LAN RTSPS stream URL for one camera. No Bosch cloud relay.
 
@@ -443,7 +487,7 @@ def bosch_camera_stream_url(camera: str) -> StreamUrlResult:
     return StreamUrlResult(camera=name, rtsps_url=rtsps_url)
 
 
-@mcp.tool()
+@_blocking_tool
 def bosch_camera_events(camera: str, limit: int = 10) -> list[dict[str, Any]]:
     """Return the most recent motion / person / audio events for one camera.
 
@@ -453,7 +497,7 @@ def bosch_camera_events(camera: str, limit: int = 10) -> list[dict[str, Any]]:
     cfg, session, cameras = _get_session()
     br.ensure_cli_importable()
 
-    import bosch_camera as bc  # type: ignore[import-not-found]
+    import bosch_camera as bc
 
     name, cam_info = br._resolve_cam(cameras, camera)
     cam_id = cam_info["id"]
@@ -501,7 +545,7 @@ async def bosch_camera_lan_ping(
         ip = lan_ip.strip()
     elif camera is not None:
         br = _bridge()
-        _cfg, _session, cameras = _get_session()
+        _cfg, _session, cameras = await asyncio.to_thread(_locked, _get_session)
         _name, cam_info = br._resolve_cam(cameras, camera)
         ip = cam_info.get("local_ip", "").strip()
         if not ip:
@@ -523,6 +567,43 @@ async def bosch_camera_lan_ping(
     return LanPingResult(reachable=reachable, ip=ip, latency_ms=latency_ms)
 
 
+def _privacy_set_cloud(
+    session: requests.Session,
+    cfg: dict[str, Any],
+    name: str,
+    cam_info: dict[str, Any],
+    enabled: bool,
+) -> CameraStatus:
+    """Blocking cloud write + readback-poll for privacy mode (runs in a worker thread)."""
+    br = _bridge()
+    br.set_privacy_mode(session, cam_info["id"], enabled)
+    # Cloud occasionally lags behind the PUT — poll briefly until the camera detail
+    # reflects the requested state, so we don't return stale `privacy_mode` to the agent.
+    import time as _time  # noqa: PLC0415 — local import to keep top of module clean
+    import bosch_camera as bc  # noqa: PLC0415
+
+    expected = "ON" if enabled else "OFF"
+    for _ in range(10):  # 10 × 0.5 s = 5 s budget
+        detail = bc.api_get_camera(session, cam_info["id"]) or {}
+        if str(detail.get("privacyMode", "")).upper() == expected:
+            break
+        _time.sleep(0.5)
+    return _build_status(name, cam_info, session, cfg)
+
+
+def _light_set_cloud(
+    session: requests.Session,
+    cfg: dict[str, Any],
+    name: str,
+    cam_info: dict[str, Any],
+    enabled: bool,
+) -> CameraStatus:
+    """Blocking cloud write for the spotlight (runs in a worker thread)."""
+    br = _bridge()
+    br.set_light(session, cam_info["id"], enabled)
+    return _build_status(name, cam_info, session, cfg)
+
+
 @mcp.tool()
 async def bosch_camera_privacy_set(
     camera: str,
@@ -538,7 +619,7 @@ async def bosch_camera_privacy_set(
     ``local_ip`` is configured.
     """
     br = _bridge()
-    cfg, session, cameras = _get_session()
+    cfg, session, cameras = await asyncio.to_thread(_locked, _get_session)
     br.ensure_cli_importable()
 
     name, cam_info = br._resolve_cam(cameras, camera)
@@ -570,7 +651,9 @@ async def bosch_camera_privacy_set(
                 logger.info(
                     "privacy_set(%s, %s): succeeded via LOCAL RCP (%s)", name, enabled, local_ip
                 )
-                return _build_status(name, cam_info, session, cfg)
+                return await asyncio.to_thread(
+                    _locked, _build_status, name, cam_info, session, cfg
+                )
             logger.warning(
                 "privacy_set(%s, %s): LOCAL RCP failed (%s), falling back to cloud",
                 name,
@@ -578,18 +661,9 @@ async def bosch_camera_privacy_set(
                 local_ip,
             )
 
-    br.set_privacy_mode(session, cam_info["id"], enabled)
-    # Cloud occasionally lags behind the PUT — poll briefly until the camera detail
-    # reflects the requested state, so we don't return stale `privacy_mode` to the agent.
-    import time as _time  # local import to keep top of module clean
-    import bosch_camera as bc  # type: ignore[import-not-found]
-    expected = "ON" if enabled else "OFF"
-    for _ in range(10):  # 10 × 0.5 s = 5 s budget
-        detail = bc.api_get_camera(session, cam_info["id"]) or {}
-        if str(detail.get("privacyMode", "")).upper() == expected:
-            break
-        _time.sleep(0.5)
-    return _build_status(name, cam_info, session, cfg)
+    return await asyncio.to_thread(
+        _locked, _privacy_set_cloud, session, cfg, name, cam_info, enabled
+    )
 
 
 @mcp.tool()
@@ -610,7 +684,7 @@ async def bosch_camera_light_set(
     no ``local_ip`` is configured.  Wallwasher RGB is always cloud-only.
     """
     br = _bridge()
-    cfg, session, cameras = _get_session()
+    cfg, session, cameras = await asyncio.to_thread(_locked, _get_session)
     br.ensure_cli_importable()
 
     name, cam_info = br._resolve_cam(cameras, camera)
@@ -658,7 +732,9 @@ async def bosch_camera_light_set(
                 logger.info(
                     "light_set(%s, %s): succeeded via LOCAL RCP (%s)", name, enabled, local_ip
                 )
-                return _build_status(name, cam_info, session, cfg)
+                return await asyncio.to_thread(
+                    _locked, _build_status, name, cam_info, session, cfg
+                )
             logger.warning(
                 "light_set(%s, %s): LOCAL RCP failed (%s), falling back to cloud",
                 name,
@@ -666,11 +742,12 @@ async def bosch_camera_light_set(
                 local_ip,
             )
 
-    br.set_light(session, cam_info["id"], enabled)
-    return _build_status(name, cam_info, session, cfg)
+    return await asyncio.to_thread(
+        _locked, _light_set_cloud, session, cfg, name, cam_info, enabled
+    )
 
 
-@mcp.tool()
+@_blocking_tool
 def bosch_camera_pan(
     camera: str,
     direction: str = "home",
@@ -707,7 +784,7 @@ def bosch_camera_pan(
     return _build_status(name, cam_info, session, cfg)
 
 
-@mcp.tool()
+@_blocking_tool
 def bosch_camera_siren_trigger(camera: str, stop: bool = False) -> CameraStatus:
     """Trigger (or stop) the indoor siren on a camera.
 
@@ -764,7 +841,7 @@ def bosch_camera_siren_trigger(camera: str, stop: bool = False) -> CameraStatus:
     return _build_status(name, cam_info, session, cfg)
 
 
-@mcp.tool()
+@_blocking_tool
 def bosch_camera_notifications_set(camera: str, enabled: bool) -> CameraStatus:
     """Toggle push notifications for one camera."""
     br = _bridge()
@@ -813,7 +890,7 @@ async def bosch_camera_maintenance_status() -> dict[str, Any]:
     return result
 
 
-@mcp.tool()
+@_blocking_tool
 def bosch_camera_audio_get(camera: str) -> AudioSettings:
     """Get the microphone and speaker level settings for one Gen2 camera.
 
@@ -845,7 +922,7 @@ def bosch_camera_audio_get(camera: str) -> AudioSettings:
     )
 
 
-@mcp.tool()
+@_blocking_tool
 def bosch_camera_audio_set(
     camera: str,
     mic_level: Optional[int] = None,
@@ -899,7 +976,7 @@ def bosch_camera_audio_set(
     )
 
 
-@mcp.tool()
+@_blocking_tool
 def bosch_camera_intrusion_get(camera: str) -> IntrusionConfig:
     """Get the intrusion detection configuration for one Gen2 camera.
 
@@ -933,7 +1010,7 @@ def bosch_camera_intrusion_get(camera: str) -> IntrusionConfig:
     )
 
 
-@mcp.tool()
+@_blocking_tool
 def bosch_camera_intrusion_set(
     camera: str,
     mode: Optional[str] = None,
@@ -1001,7 +1078,7 @@ def bosch_camera_intrusion_set(
     )
 
 
-@mcp.tool()
+@_blocking_tool
 def bosch_camera_wifi(camera: str) -> WifiInfo:
     """Get the WiFi signal quality for one camera.
 
@@ -1101,7 +1178,7 @@ async def bosch_camera_mjpeg_snapshot(camera: str) -> dict[str, Any]:
     from urllib.parse import quote as _q
 
     br = _bridge()
-    cfg, session, cameras = _get_session()
+    cfg, session, cameras = await asyncio.to_thread(_locked, _get_session)
     br.ensure_cli_importable()
 
     name, cam_info = br._resolve_cam(cameras, camera)
@@ -1188,7 +1265,7 @@ async def bosch_camera_onvif_scopes(camera: str) -> dict[str, Any]:
     Gen2 only (HOME_Eyes_Outdoor / HOME_Eyes_Indoor).
     """
     br = _bridge()
-    cfg, session, cameras = _get_session()
+    cfg, session, cameras = await asyncio.to_thread(_locked, _get_session)
     br.ensure_cli_importable()
 
     name, cam_info = br._resolve_cam(cameras, camera)
@@ -1254,7 +1331,7 @@ async def bosch_camera_rcp_version(camera: str) -> dict[str, Any]:
     Useful for diagnosing protocol compatibility. Requires local_ip + local credentials.
     """
     br = _bridge()
-    cfg, session, cameras = _get_session()
+    cfg, session, cameras = await asyncio.to_thread(_locked, _get_session)
     br.ensure_cli_importable()
 
     name, cam_info = br._resolve_cam(cameras, camera)
@@ -1298,7 +1375,7 @@ async def bosch_camera_rcp_version(camera: str) -> dict[str, Any]:
     }
 
 
-@mcp.tool()
+@_blocking_tool
 def bosch_camera_feature_flags() -> dict[str, Any]:
     """Fetch account-level Bosch cloud feature flags from GET /v11/feature_flags.
 
@@ -1332,7 +1409,7 @@ def bosch_camera_feature_flags() -> dict[str, Any]:
 # ── v1.6.0 tools: motion, recording, autofollow, privacy_sound, unread, health_check_all, token_status ──
 
 
-@mcp.tool()
+@_blocking_tool
 def bosch_camera_motion_get(camera: str) -> MotionConfig:
     """Get motion detection settings for one camera.
 
@@ -1359,7 +1436,7 @@ def bosch_camera_motion_get(camera: str) -> MotionConfig:
     )
 
 
-@mcp.tool()
+@_blocking_tool
 def bosch_camera_motion_set(
     camera: str,
     enabled: Optional[bool] = None,
@@ -1417,7 +1494,7 @@ def bosch_camera_motion_set(
     )
 
 
-@mcp.tool()
+@_blocking_tool
 def bosch_camera_recording_get(camera: str) -> RecordingOptions:
     """Get cloud recording options for one camera.
 
@@ -1440,7 +1517,7 @@ def bosch_camera_recording_get(camera: str) -> RecordingOptions:
     return RecordingOptions(sound_on=bool(raw.get("recordSound", False)))
 
 
-@mcp.tool()
+@_blocking_tool
 def bosch_camera_recording_set(camera: str, sound_on: bool) -> RecordingOptions:
     """Enable or disable audio in cloud recordings for one camera.
 
@@ -1465,7 +1542,7 @@ def bosch_camera_recording_set(camera: str, sound_on: bool) -> RecordingOptions:
     return RecordingOptions(sound_on=bool(raw.get("recordSound", False)))
 
 
-@mcp.tool()
+@_blocking_tool
 def bosch_camera_autofollow_get(camera: str) -> AutofollowConfig:
     """Get auto-follow (360° auto-tracking) state for one camera.
 
@@ -1500,7 +1577,7 @@ def bosch_camera_autofollow_get(camera: str) -> AutofollowConfig:
     return AutofollowConfig(enabled=bool(raw.get("result", False)))
 
 
-@mcp.tool()
+@_blocking_tool
 def bosch_camera_autofollow_set(camera: str, enabled: bool) -> AutofollowConfig:
     """Enable or disable 360° auto-tracking for one camera.
 
@@ -1535,7 +1612,7 @@ def bosch_camera_autofollow_set(camera: str, enabled: bool) -> AutofollowConfig:
     return AutofollowConfig(enabled=bool(raw.get("result", False)))
 
 
-@mcp.tool()
+@_blocking_tool
 def bosch_camera_privacy_sound_get(camera: str) -> PrivacySoundConfig:
     """Get the privacy-sound indicator setting for one camera.
 
@@ -1559,7 +1636,7 @@ def bosch_camera_privacy_sound_get(camera: str) -> PrivacySoundConfig:
     return PrivacySoundConfig(enabled=bool(raw.get("result", False)))
 
 
-@mcp.tool()
+@_blocking_tool
 def bosch_camera_privacy_sound_set(camera: str, enabled: bool) -> PrivacySoundConfig:
     """Enable or disable the audible indicator that plays when privacy mode changes.
 
@@ -1584,7 +1661,7 @@ def bosch_camera_privacy_sound_set(camera: str, enabled: bool) -> PrivacySoundCo
     return PrivacySoundConfig(enabled=bool(raw.get("result", False)))
 
 
-@mcp.tool()
+@_blocking_tool
 def bosch_camera_unread_get(camera: str) -> UnreadCount:
     """Get the unread event count for one camera.
 
@@ -1620,7 +1697,7 @@ def bosch_camera_unread_get(camera: str) -> UnreadCount:
     return UnreadCount(camera=name, count=count)
 
 
-@mcp.tool()
+@_blocking_tool
 def bosch_camera_health_check_all() -> list[CameraHealthEntry]:
     """Bulk health check for ALL configured cameras in one call.
 
@@ -1634,11 +1711,11 @@ def bosch_camera_health_check_all() -> list[CameraHealthEntry]:
     cfg, session, cameras = _get_session()
     br.ensure_cli_importable()
 
-    import bosch_camera as bc  # type: ignore[import-not-found]
+    import bosch_camera as bc
     from .adapters.cli_bridge import CLOUD_API  # noqa: PLC0415
 
     # Fetch the full /v11/video_inputs listing once for unread counts + status
-    listing_by_id: dict[str, dict] = {}
+    listing_by_id: dict[str, dict[str, Any]] = {}
     try:
         r = session.get(f"{CLOUD_API}/v11/video_inputs", timeout=15)
         if r.status_code == 200:
@@ -1709,7 +1786,7 @@ def bosch_camera_health_check_all() -> list[CameraHealthEntry]:
     return results
 
 
-@mcp.tool()
+@_blocking_tool
 def bosch_camera_token_status() -> TokenStatus:
     """Return the current bearer token validity, expiry, and account email.
 
