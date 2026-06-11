@@ -20,6 +20,8 @@ from typing import Any, Optional
 
 import requests
 
+from bosch_camera_mcp.cloud_ssl import bosch_cloud_ssl_context
+
 logger = logging.getLogger("bosch_camera_mcp.bridge")
 
 # ── Path injection ────────────────────────────────────────────────────────────
@@ -104,14 +106,10 @@ def get_session_and_cameras(
     # long-expired tokens (incident 2026-05-24: 34-day-old token never refreshed).
     token = cfg["account"].get("bearer_token", "").strip()
     needs_refresh = (
-        not token
-        or bc._is_token_near_expiry(token, buffer_secs=300)
-        or bc._is_token_expired(token)
+        not token or bc._is_token_near_expiry(token, buffer_secs=300) or bc._is_token_expired(token)
     )
     if needs_refresh:
-        logger.warning(
-            "Token missing or near-expiry (< 5 min). Attempting silent renewal."
-        )
+        logger.warning("Token missing or near-expiry (< 5 min). Attempting silent renewal.")
         # Try silent renewal via refresh_token
         refresh = cfg["account"].get("refresh_token", "").strip()
         renewed = False
@@ -122,9 +120,7 @@ def get_session_and_cameras(
                 tokens = _do_refresh(refresh)
                 if tokens:
                     cfg["account"]["bearer_token"] = tokens.get("access_token", "")
-                    cfg["account"]["refresh_token"] = tokens.get(
-                        "refresh_token", refresh
-                    )
+                    cfg["account"]["refresh_token"] = tokens.get("refresh_token", refresh)
                     bc.save_config(cfg)
                     token = cfg["account"]["bearer_token"]
                     renewed = True
@@ -144,11 +140,17 @@ def get_session_and_cameras(
                 )
             # Token exists but is near-expiry and renewal failed — log warning
             # and proceed; the API call may still succeed if expiry is marginal.
-            logger.warning(
-                "Token near-expiry and renewal failed — proceeding with existing token."
-            )
+            logger.warning("Token near-expiry and renewal failed — proceeding with existing token.")
 
     session = bc.make_session(token)
+    # CWE-295 / GHSA-6qh5-x5m5-vj6v: the CLI's make_session() sets
+    # session.verify = False for cloud calls (private Bosch PKI not in any
+    # public trust store).  Override defensively here so that MCP cloud TLS
+    # verification is guaranteed regardless of the installed CLI version.
+    # requests accepts an ssl.SSLContext as the `verify` argument.
+    # LOCAL httpx/CERT_NONE sites (lan_rcp.py, server.py:1147) are intentionally
+    # excluded — they are LAN self-signed cameras, TOFU-pinned.
+    session.verify = bosch_cloud_ssl_context()
     cached = cfg.get("cameras", {})
 
     # Always refresh from /v11/video_inputs — the cloud is authoritative for
@@ -365,9 +367,7 @@ def set_pan(session: requests.Session, cam_id: str, direction: str) -> dict[str,
     return {}  # unreachable
 
 
-def set_notifications(
-    session: requests.Session, cam_id: str, enabled: bool
-) -> bool:
+def set_notifications(session: requests.Session, cam_id: str, enabled: bool) -> bool:
     """PUT /v11/video_inputs/{cam_id}/enable_notifications → on or off.
 
     Returns True on success.

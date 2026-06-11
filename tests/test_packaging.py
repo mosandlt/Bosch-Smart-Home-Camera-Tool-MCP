@@ -56,6 +56,7 @@ class TestModuleImport:
         """Smoke: the package must be importable without side-effects or errors."""
         # Re-import to ensure no cached failure state masks a real issue
         import bosch_camera_mcp
+
         assert hasattr(bosch_camera_mcp, "__version__")
         assert isinstance(bosch_camera_mcp.__version__, str)
         assert bosch_camera_mcp.__version__  # non-empty
@@ -63,11 +64,13 @@ class TestModuleImport:
     def test_server_module_importable(self) -> None:
         """server.py must import without requiring bosch_camera on the path."""
         import bosch_camera_mcp.server as srv
+
         assert hasattr(srv, "main")
         assert hasattr(srv, "_parse_args")
         assert hasattr(srv, "mcp")
 
-    def test_version_is_v1_5_2(self) -> None:
-        """Canonical version check for v1.5.2 — dep hygiene: drop unused aiohttp runtime dep, security floors (pyjwt/starlette), httpx test fix."""
+    def test_version_is_v1_5_3(self) -> None:
+        """Canonical version check for v1.5.3 — security: pin Bosch cloud CA for MCP cloud session (CWE-295, GHSA-6qh5-x5m5-vj6v)."""
         from bosch_camera_mcp import __version__
-        assert __version__ == "1.5.2"
+
+        assert __version__ == "1.5.3"

@@ -1,5 +1,11 @@
 # Changelog — Bosch Smart Home Camera MCP Server
 
+## [v1.5.3] - 2026-06-11
+
+### Security
+
+- **Pin Bosch cloud CA for MCP cloud session (CWE-295, GHSA-6qh5-x5m5-vj6v)** — the shared `requests.Session` used for all cloud OAuth and API calls now verifies TLS against the Bosch private CA bundle (bundled in the package) plus system roots, instead of accepting any certificate. Closes an adjacent-network MITM attack surface on OAuth tokens and bearer-credential exchanges. Local camera endpoints are unchanged (TOFU-pinned at first connect as before).
+
 ## [v1.5.2] - 2026-06-03
 
 ### Dependencies

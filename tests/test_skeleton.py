@@ -28,9 +28,9 @@ from bosch_camera_mcp.server import (
 
 
 class TestVersion:
-    def test_version_is_v1_5_2(self) -> None:
-        """v1.5.2 — dependency hygiene: drop unused aiohttp runtime dep + pyjwt/starlette security floors + httpx test fix."""
-        assert __version__ == "1.5.2"
+    def test_version_is_v1_5_3(self) -> None:
+        """v1.5.3 — security: pin Bosch cloud CA for MCP cloud session (CWE-295, GHSA-6qh5-x5m5-vj6v)."""
+        assert __version__ == "1.5.3"
 
 
 class TestServerApp:
