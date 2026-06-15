@@ -373,7 +373,7 @@ The Bosch Smart Home Camera reverse-engineered API is exposed via four sibling p
 
 | Feature | [Home Assistant Integration](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | [Python CLI Tool](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | [ioBroker Adapter](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | [MCP Server](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) | [Frontend (NiceGUI)](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python-frontend) | [Node-RED](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-NodeRED) |
 |---|---|---|---|---|---|---|
-| **Maturity** | v13.5+ — HA Quality Scale **Platinum** | v10.10+ stable (Mini-NVR BETA) | v1.5+ stable · npm | v1.5+ stable · PyPI | v0.1.2 **alpha** · PyPI parked | v0.2.3 **alpha** · npm |
+| **Maturity** | v13.5+ — HA Quality Scale **Platinum** | v10.10+ stable (Mini-NVR BETA) | v1.5+ stable · npm | v1.5+ stable · PyPI | v0.1.2 **alpha** · PyPI | v0.2.3 **alpha** · npm |
 | **Platform** | Home Assistant (HACS) | Standalone Python 3.10+ CLI | ioBroker (npm) | Python 3.10+ · pipx / uvx · stdio + streamable-HTTP for MCP clients (Claude Desktop, Claude Code, custom) | NiceGUI web app · Python 3.10+ | Node-RED palette · npm |
 | **Login** | OAuth2 PKCE (browser) | OAuth2 PKCE (browser) | OAuth2 PKCE (browser) | OAuth2 PKCE (browser, one-time) | ◑ shares CLI `bosch_config.json` | ◑ refresh-token from CLI |
 | **Snapshots** | ✅ Native `Camera.image` | ✅ `snapshot` command | ✅ File-store + base64 DP | ✅ `bosch_camera_snapshot` (LAN-only) | ✅ live + event fallback | ✅ `snapshot` node |
