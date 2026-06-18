@@ -229,7 +229,7 @@ class TestStatus:
         assert s.name == "Garten"
         assert s.status == "ONLINE"
         assert s.privacy_mode is False
-        assert s.last_event_at == "2026-05-17T10:00:00"  # truncated to 19 chars
+        assert s.last_event_at == "2026-05-17T10:00:00Z"  # tz designator preserved (#34)
 
     def test_status_returns_camera_status_type(self, patch_bosch_camera):
         from bosch_camera_mcp.server import CameraStatus, bosch_camera_status
@@ -394,7 +394,7 @@ class TestEvents:
         first = result[0]
         assert first["event_id"] == "evt-001"
         assert first["type"] == "MOTION"
-        assert first["timestamp_iso"] == "2026-05-17T10:00:00"
+        assert first["timestamp_iso"] == "2026-05-17T10:00:00Z"
         assert first["has_clip"] is True
 
     def test_events_respects_limit(self, patch_bosch_camera):

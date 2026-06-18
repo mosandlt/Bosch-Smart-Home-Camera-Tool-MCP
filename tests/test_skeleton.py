@@ -28,9 +28,9 @@ from bosch_camera_mcp.server import (
 
 
 class TestVersion:
-    def test_version_is_v1_5_3(self) -> None:
-        """v1.5.3 — security: pin Bosch cloud CA for MCP cloud session (CWE-295, GHSA-6qh5-x5m5-vj6v)."""
-        assert __version__ == "1.5.3"
+    def test_version_is_v1_5_4(self) -> None:
+        """v1.5.4 — event timestamps preserve the tz offset (#34)."""
+        assert __version__ == "1.5.4"
 
 
 class TestServerApp:

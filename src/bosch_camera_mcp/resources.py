@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 
 from .errors import MCPError
 from .server import mcp
+from .time_utils import clean_bosch_timestamp
 
 if TYPE_CHECKING:
     import requests
@@ -154,7 +155,7 @@ def camera_events(name: str) -> str:
             {
                 "event_id": ev.get("id", ""),
                 "type": ev.get("type", "UNKNOWN"),
-                "timestamp_iso": ts_raw[:19] if ts_raw else "",
+                "timestamp_iso": clean_bosch_timestamp(ts_raw),
                 "has_clip": bool(ev.get("clipUrl") or ev.get("videoUrl")),
             }
         )

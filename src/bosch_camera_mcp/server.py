@@ -35,6 +35,7 @@ from pydantic import BaseModel, Field
 
 from . import __version__
 from .errors import MCPError
+from .time_utils import clean_bosch_timestamp
 
 logger = logging.getLogger("bosch_camera_mcp")
 
@@ -295,7 +296,7 @@ def _build_status(
         events = bc.api_get_events(session, cam_id, limit=1)
         if events:
             ts_raw = events[0].get("timestamp", "")
-            last_event_at = ts_raw[:19] if ts_raw else None
+            last_event_at = clean_bosch_timestamp(ts_raw) or None
     except Exception:
         pass
 
@@ -517,7 +518,7 @@ def bosch_camera_events(camera: str, limit: int = 10) -> list[dict[str, Any]]:
                 "event_id": ev.get("id", ""),
                 "type": ev.get("eventType") or ev.get("type") or "UNKNOWN",
                 "tags": ev.get("eventTags") or [],
-                "timestamp_iso": ts_raw[:19] if ts_raw else "",
+                "timestamp_iso": clean_bosch_timestamp(ts_raw),
                 "has_clip": has_clip,
                 "clip_status": upload_status or None,
             }
@@ -1759,7 +1760,7 @@ def bosch_camera_health_check_all() -> list[CameraHealthEntry]:
                 events = bc.api_get_events(session, cam_id, limit=1)
                 if events:
                     ts_raw = events[0].get("timestamp", "")
-                    last_event_at = ts_raw[:19] if ts_raw else None
+                    last_event_at = clean_bosch_timestamp(ts_raw) or None
             except Exception:
                 pass
 

@@ -1,5 +1,11 @@
 # Changelog — Bosch Smart Home Camera MCP Server
 
+## [v1.5.4] - 2026-06-18
+
+### Fixed
+
+- **Event timestamps no longer drop the timezone offset.** Bosch `/v11/events` timestamps are offset-bearing (e.g. `2026-06-18T06:06:30.499+02:00[Europe/Berlin]`). The server truncated them to the first 19 characters (`timestamp_iso` in the event list/resource and `last_event_at` in camera status/health), which discarded the `+02:00` offset — a consumer reading the field (documented as "ISO 8601 timestamp") would assume UTC and be off by the local offset (e.g. +2h in CEST). The server now strips only the trailing RFC-9557 `[zone]` suffix, preserving the explicit offset so the value is faithful, unambiguous ISO 8601. (Cross-version of the Home Assistant issue #34 fix.)
+
 ## [v1.5.3] - 2026-06-11
 
 ### Security
