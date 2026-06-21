@@ -28,9 +28,9 @@ from bosch_camera_mcp.server import (
 
 
 class TestVersion:
-    def test_version_is_v1_5_4(self) -> None:
-        """v1.5.4 — event timestamps preserve the tz offset (#34)."""
-        assert __version__ == "1.5.4"
+    def test_version_is_v1_5_5(self) -> None:
+        """v1.5.5 — resource event view uses eventType+eventTags (#36 Fix D)."""
+        assert __version__ == "1.5.5"
 
 
 class TestServerApp:

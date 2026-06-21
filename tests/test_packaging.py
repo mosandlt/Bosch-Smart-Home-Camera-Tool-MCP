@@ -69,8 +69,8 @@ class TestModuleImport:
         assert hasattr(srv, "_parse_args")
         assert hasattr(srv, "mcp")
 
-    def test_version_is_v1_5_4(self) -> None:
-        """Canonical version check for v1.5.4 — event timestamps preserve the tz offset (#34)."""
+    def test_version_is_v1_5_5(self) -> None:
+        """Canonical version check for v1.5.5 — resource event view uses eventType+eventTags (#36 Fix D)."""
         from bosch_camera_mcp import __version__
 
-        assert __version__ == "1.5.4"
+        assert __version__ == "1.5.5"

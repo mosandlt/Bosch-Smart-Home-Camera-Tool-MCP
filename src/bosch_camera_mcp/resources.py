@@ -103,9 +103,7 @@ def camera_snapshot(name: str) -> bytes:
     br = _bridge()
     canonical_name, _cam_info = br._resolve_cam(cameras, name)
     safe_name = canonical_name.replace(" ", "_")
-    cache_dir = (
-        Path.home() / ".cache" / "bosch-camera-mcp" / "snapshots" / str(safe_name)
-    )
+    cache_dir = Path.home() / ".cache" / "bosch-camera-mcp" / "snapshots" / str(safe_name)
 
     # Try cache hit first
     if cache_dir.is_dir():
@@ -151,12 +149,16 @@ def camera_events(name: str) -> str:
     normalized: list[dict[str, Any]] = []
     for ev in raw_events[:50]:
         ts_raw = ev.get("timestamp", "")
+        upload_status = ev.get("videoClipUploadStatus", "")
+        has_clip = bool(ev.get("videoClipUrl")) or upload_status == "Done"
         normalized.append(
             {
                 "event_id": ev.get("id", ""),
-                "type": ev.get("type", "UNKNOWN"),
+                "type": ev.get("eventType") or ev.get("type") or "UNKNOWN",
+                "tags": ev.get("eventTags") or [],
                 "timestamp_iso": clean_bosch_timestamp(ts_raw),
-                "has_clip": bool(ev.get("clipUrl") or ev.get("videoUrl")),
+                "has_clip": has_clip,
+                "clip_status": upload_status or None,
             }
         )
     return json.dumps(normalized, indent=2)

@@ -18,11 +18,9 @@ import pytest
 CAM_ID_1 = "aaaa-1111-aaaa-1111"
 CAM_ID_2 = "bbbb-2222-bbbb-2222"
 
-_VALID_TOKEN = (
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
-    ".eyJleHAiOjQxMDI0NDQ4MDB9"
-    ".placeholder"
-)
+# typ-first header order (eyJ0…) — functionally identical fake JWT, avoids the
+# pre-push hook's eyJhbG (alg-first) heuristic. Matches the repo's other tests.
+_VALID_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJleHAiOjQxMDI0NDQ4MDB9.placeholder"
 
 _CFG = {
     "account": {
@@ -63,12 +61,23 @@ _CFG = {
 _EVENTS_CAM1 = [
     {
         "id": f"evt-{i:03d}",
-        "type": "MOTION" if i % 2 == 0 else "PERSON",
+        "eventType": "MOVEMENT" if i % 2 == 0 else "AUDIO",
+        "eventTags": ["PERSON"] if i % 4 == 0 else [],
         "timestamp": f"2026-05-17T{i:02d}:00:00Z",
         "imageUrl": None,
-        "clipUrl": f"https://example.com/clip/{i}" if i < 5 else None,
+        "videoClipUrl": f"https://example.com/clip/{i}" if i < 5 else None,
     }
     for i in range(50)
+]
+
+# Legacy events that only have the old `type` field (no `eventType`) — for fallback test
+_EVENTS_LEGACY = [
+    {
+        "id": "evt-legacy-001",
+        "type": "MOTION",
+        "timestamp": "2026-05-17T10:00:00Z",
+        "clipUrl": "https://example.com/legacy-clip",
+    }
 ]
 
 
@@ -83,14 +92,14 @@ def _make_fake_bc(cfg=_CFG):
     m._is_token_near_expiry.return_value = False
     m.make_session.return_value = req_lib.Session()
     m.save_config.return_value = None
-    m.api_ping.side_effect = lambda session, cam_id: (
-        "ONLINE" if cam_id == CAM_ID_1 else "OFFLINE"
-    )
+    m.api_ping.side_effect = lambda session, cam_id: "ONLINE" if cam_id == CAM_ID_1 else "OFFLINE"
     m.api_get_events.side_effect = lambda session, cam_id, limit=50: (
         _EVENTS_CAM1[:limit] if cam_id == CAM_ID_1 else []
     )
     m.snap_from_proxy.return_value = b"\xff\xd8\xff" + b"\x00" * 100  # kept for legacy
-    m.snap_from_local.return_value = b"\xff\xd8\xff" + b"\x00" * 80  # LAN snapshot (v1.1.0 primary path)
+    m.snap_from_local.return_value = (
+        b"\xff\xd8\xff" + b"\x00" * 80
+    )  # LAN snapshot (v1.1.0 primary path)
     m.snap_from_events.return_value = (b"\xff\xd8\xff" + b"\x00" * 50, "2026-05-17T08:00:00")
     return m
 
@@ -204,9 +213,7 @@ class TestCameraSnapshotResource:
         from bosch_camera_mcp.resources import camera_snapshot
 
         # Ensure cache dir does NOT exist
-        cache_dir = (
-            tmp_path / ".cache" / "bosch-camera-mcp" / "snapshots" / "Garten"
-        )
+        cache_dir = tmp_path / ".cache" / "bosch-camera-mcp" / "snapshots" / "Garten"
         assert not cache_dir.exists()
 
         with patch("pathlib.Path.home", return_value=tmp_path):
@@ -271,8 +278,10 @@ class TestCameraEventsResource:
         first = data[0]
         assert "event_id" in first
         assert "type" in first
+        assert "tags" in first
         assert "timestamp_iso" in first
         assert "has_clip" in first
+        assert "clip_status" in first
 
     def test_events_resource_offline_camera_returns_empty_list(self):
         from bosch_camera_mcp.resources import camera_events
@@ -300,7 +309,174 @@ class TestCameraEventsResource:
         from bosch_camera_mcp.resources import camera_events
 
         data = json.loads(camera_events("Garten"))
-        # Events 0–4 have clipUrl → has_clip=True
+        # Events 0–4 have videoClipUrl → has_clip=True
         assert data[0]["has_clip"] is True
-        # Event 5+ have no clipUrl → has_clip=False
+        # Event 5+ have no videoClipUrl → has_clip=False
         assert data[5]["has_clip"] is False
+
+    # ── Regression tests for issue #36 Fix D (v1.5.5) ────────────────────────
+
+    def test_events_resource_uses_eventType_not_type(self):
+        """Bosch payload field is `eventType`; resource must NOT show UNKNOWN (issue #36 Fix D)."""
+        from bosch_camera_mcp.resources import camera_events
+
+        data = json.loads(camera_events("Garten"))
+        # _EVENTS_CAM1 has eventType set; no event should show "UNKNOWN"
+        types = {ev["type"] for ev in data}
+        assert "UNKNOWN" not in types
+        assert "MOVEMENT" in types or "AUDIO" in types
+
+    def test_events_resource_surfaces_eventTags_for_person(self):
+        """Gen2 MOVEMENT+PERSON events: `tags` must contain ["PERSON"], not be dropped (issue #36 Fix D)."""
+        from bosch_camera_mcp.resources import camera_events
+
+        data = json.loads(camera_events("Garten"))
+        # Events at indices 0, 4, 8… have eventTags=["PERSON"] (i % 4 == 0)
+        person_events = [ev for ev in data if ev["tags"] == ["PERSON"]]
+        assert len(person_events) > 0, "Expected at least one event with tags=['PERSON']"
+
+    def test_events_resource_tags_empty_list_when_no_person(self):
+        """Events without eventTags must produce tags=[] not dropped/None."""
+        from bosch_camera_mcp.resources import camera_events
+
+        data = json.loads(camera_events("Garten"))
+        # Event index 2 has eventTags=[] (i=2, 2%4 != 0)
+        assert data[2]["tags"] == []
+
+    def test_events_resource_legacy_type_fallback(self, monkeypatch):
+        """Legacy events with only `type` (no `eventType`) still fall back correctly."""
+        import sys
+
+        fake_bc = _make_fake_bc()
+        fake_bc.api_get_events.side_effect = lambda session, cam_id, limit=50: (
+            _EVENTS_LEGACY if cam_id == CAM_ID_1 else []
+        )
+        monkeypatch.setitem(sys.modules, "bosch_camera", fake_bc)
+
+        import bosch_camera_mcp.resources as res_mod
+        import requests as req_lib
+
+        monkeypatch.setattr(
+            res_mod,
+            "_get_session",
+            lambda config_path=None: (_CFG, req_lib.Session(), _CFG["cameras"]),
+        )
+
+        from bosch_camera_mcp.resources import camera_events
+
+        data = json.loads(camera_events("Garten"))
+        assert len(data) == 1
+        assert data[0]["type"] == "MOTION", f"Expected 'MOTION', got {data[0]['type']!r}"
+        assert data[0]["tags"] == []
+
+    def test_events_resource_clip_status_field_present(self):
+        """clip_status field must be present in every normalised event."""
+        from bosch_camera_mcp.resources import camera_events
+
+        data = json.loads(camera_events("Garten"))
+        for ev in data:
+            assert "clip_status" in ev
+
+    def test_events_resource_eventType_wins_over_legacy_type(self, monkeypatch):
+        """When both `eventType` AND `type` are present, `eventType` must win."""
+        import sys
+
+        fake_bc = _make_fake_bc()
+        fake_bc.api_get_events.side_effect = lambda session, cam_id, limit=50: (
+            [
+                {
+                    "id": "evt-conflict-001",
+                    "eventType": "MOVEMENT",
+                    "type": "SOMETHING_ELSE",
+                    "eventTags": [],
+                    "timestamp": "2026-05-17T10:00:00Z",
+                }
+            ]
+            if cam_id == CAM_ID_1
+            else []
+        )
+        monkeypatch.setitem(sys.modules, "bosch_camera", fake_bc)
+
+        import bosch_camera_mcp.resources as res_mod
+        import requests as req_lib
+
+        monkeypatch.setattr(
+            res_mod,
+            "_get_session",
+            lambda config_path=None: (_CFG, req_lib.Session(), _CFG["cameras"]),
+        )
+
+        from bosch_camera_mcp.resources import camera_events
+
+        data = json.loads(camera_events("Garten"))
+        assert data[0]["type"] == "MOVEMENT", f"eventType must win; got {data[0]['type']!r}"
+
+    def test_events_resource_empty_eventType_falls_through(self, monkeypatch):
+        """eventType='' (empty string) is falsy → falls through to legacy `type`."""
+        import sys
+
+        fake_bc = _make_fake_bc()
+        fake_bc.api_get_events.side_effect = lambda session, cam_id, limit=50: (
+            [
+                {
+                    "id": "evt-empty-001",
+                    "eventType": "",
+                    "type": "AUDIO",
+                    "eventTags": [],
+                    "timestamp": "2026-05-17T10:00:00Z",
+                }
+            ]
+            if cam_id == CAM_ID_1
+            else []
+        )
+        monkeypatch.setitem(sys.modules, "bosch_camera", fake_bc)
+
+        import bosch_camera_mcp.resources as res_mod
+        import requests as req_lib
+
+        monkeypatch.setattr(
+            res_mod,
+            "_get_session",
+            lambda config_path=None: (_CFG, req_lib.Session(), _CFG["cameras"]),
+        )
+
+        from bosch_camera_mcp.resources import camera_events
+
+        data = json.loads(camera_events("Garten"))
+        assert data[0]["type"] == "AUDIO", f"Expected fallback 'AUDIO'; got {data[0]['type']!r}"
+
+    def test_events_resource_has_clip_true_from_upload_status_done(self, monkeypatch):
+        """has_clip=True when videoClipUploadStatus='Done' even without videoClipUrl."""
+        import sys
+
+        fake_bc = _make_fake_bc()
+        fake_bc.api_get_events.side_effect = lambda session, cam_id, limit=50: (
+            [
+                {
+                    "id": "evt-done-001",
+                    "eventType": "MOVEMENT",
+                    "eventTags": [],
+                    "timestamp": "2026-05-17T10:00:00Z",
+                    "videoClipUrl": None,
+                    "videoClipUploadStatus": "Done",
+                }
+            ]
+            if cam_id == CAM_ID_1
+            else []
+        )
+        monkeypatch.setitem(sys.modules, "bosch_camera", fake_bc)
+
+        import bosch_camera_mcp.resources as res_mod
+        import requests as req_lib
+
+        monkeypatch.setattr(
+            res_mod,
+            "_get_session",
+            lambda config_path=None: (_CFG, req_lib.Session(), _CFG["cameras"]),
+        )
+
+        from bosch_camera_mcp.resources import camera_events
+
+        data = json.loads(camera_events("Garten"))
+        assert data[0]["has_clip"] is True, "has_clip must be True when upload_status='Done'"
+        assert data[0]["clip_status"] == "Done"
