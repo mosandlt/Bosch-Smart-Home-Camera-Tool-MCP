@@ -1,5 +1,9 @@
 # Changelog — Bosch Smart Home Camera MCP Server
 
+## [v1.5.5] - 2026-06-29
+
+- **`camera_events` resource:** use `eventType + eventTags` for correct event classification (fixes #36 Fix D)
+
 ## [v1.5.4] - 2026-06-18
 
 ### Fixed
