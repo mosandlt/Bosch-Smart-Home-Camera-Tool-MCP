@@ -2,13 +2,13 @@
 
 ## Why MCP?
 
-The MCP (Model Context Protocol) is the standard interface for connecting LLM clients (Claude Code, Claude Desktop, Cursor, Cline, etc.) to external tools and data sources. By wrapping the Bosch Camera API as an MCP server, the LLM gains direct access to camera operations without shell-out hacks, manual prompting, or copy-pasting JSON.
+MCP (Model Context Protocol) is the standard interface for connecting LLM clients (Claude Code, Claude Desktop, Cursor, Cline, etc.) to external tools and data sources. By wrapping the Bosch Camera API as an MCP server, the LLM gains direct access to camera operations without shell-out hacks, manual prompting, or copy-pasting JSON.
 
 ## Design constraints
 
 1. **Reuse, don't reimplement.** The sister Python CLI tool already solves the hard problems: OAuth2 PKCE flow, token rotation, FCM push, TLS-proxy, RCP protocol, Digest auth. The MCP server imports those modules; it does not duplicate them.
-2. **Read-safe by default.** A misbehaving LLM should not be able to spam the API, exhaust quotas, or trigger physical actions (light, siren) without user intent. All write-tools require explicit user consent in Claude's tool-approval flow.
-3. **Stateless server, stateful config.** The server process holds no session state; all persistence (token, camera registry) lives in `bosch_config.json` which is owned by the user, not the MCP process.
+2. **Read-safe by default.** All write-tools require explicit user consent in Claude's tool-approval flow.
+3. **Stateless server, stateful config.** No session state in the server process; all persistence (token, camera registry) lives in `bosch_config.json` owned by the user, not the MCP process.
 4. **Single-process, single-user.** Each MCP server instance is bound to one Bosch account. Multi-tenant is explicitly out of scope.
 5. **Local-first.** Default transport is stdio; HTTP-based remote access is opt-in and requires explicit binding to a non-localhost interface.
 
@@ -55,7 +55,7 @@ The MCP (Model Context Protocol) is the standard interface for connecting LLM cl
 
 ## Dependency on the sister CLI
 
-The MCP server pins a specific minor version of the Python CLI tool. Two ways to ship this dependency:
+The MCP server pins a specific minor version of the Python CLI tool.
 
 ### Option A: Git submodule
 ```
@@ -63,8 +63,7 @@ Bosch-Smart-Home-Camera-Tool-MCP/
 └── vendor/
     └── bosch_camera_cli/   ← git submodule pinned to a CLI tag
 ```
-- Pro: explicit version pin, full source visible
-- Con: submodule UX is awkward; users need `git clone --recurse-submodules`
+PRO: explicit version pin, full source visible. CON: submodule UX is awkward; users need `git clone --recurse-submodules`
 
 ### Option B: Refactor CLI into a library (preferred)
 Refactor the CLI's pure logic (config, token, API calls) into a `bosch_camera_lib` Python package that both the CLI and the MCP server import:
@@ -87,7 +86,7 @@ The MCP server then declares `bosch-smart-home-camera-cli >= 10.4.0` as a regula
 This refactor is **out of scope for the initial MCP repo creation** but is the long-term direction.
 
 ### Option C (interim): import path injection
-The MCP server's `__init__.py` adds a configurable path to `sys.path` pointing at the sister-CLI checkout. This is a pragmatic workaround until Option B is ready.
+The MCP server's `__init__.py` adds a configurable path to `sys.path` pointing at the sister-CLI checkout.
 
 ```python
 # bosch_camera_mcp/__init__.py
@@ -104,20 +103,9 @@ if os.path.isdir(_cli_path) and _cli_path not in sys.path:
 
 Drawback: implicit, fragile, but acceptable for v0.1.0-alpha.
 
-**Status (v0.4.0-alpha):** Option C is the active implementation. The adapter
-`bosch_camera_mcp/adapters/cli_bridge.py` handles sys.path injection via
-`ensure_cli_importable()` and exposes `get_session_and_cameras()` +
-write helpers (`set_privacy_mode`, `set_light`, `set_pan`, `set_notifications`).
-All 8 tools are wired and tested. Write tools were implemented as new API-call
-functions in cli_bridge.py rather than calling the cmd_* functions directly —
-the cmd_* functions call print()/sys.exit() and are not suitable as library calls.
-Resources and prompts are implemented in `resources.py` and `prompts.py` and
-imported at the bottom of `server.py` to self-register via decorator side-effects.
-Refactor to Option B (library extraction) is deferred to v0.6.0.
+**Status (v0.4.0-alpha):** Option C is the active implementation. The adapter `bosch_camera_mcp/adapters/cli_bridge.py` handles sys.path injection via `ensure_cli_importable()` and exposes `get_session_and_cameras()` + write helpers (`set_privacy_mode`, `set_light`, `set_pan`, `set_notifications`). All 8 tools are wired and tested. Write tools were implemented as new API-call functions in cli_bridge.py rather than calling the cmd_* functions directly — the cmd_* functions call print()/sys.exit() and are not suitable as library calls. Resources and prompts are implemented in `resources.py` and `prompts.py` and imported at the bottom of `server.py` to self-register via decorator side-effects. Refactor to Option B (library extraction) is deferred to v0.6.0.
 
 ## Design constraints: LAN-only media path (v1.1.0)
-
-### Rationale
 
 Snapshots and stream URLs carry sensitive visual data. Routing them through the Bosch cloud introduces a third-party data processor in an LLM-assisted flow where the user has not explicitly consented to cloud relay of live camera images. From v1.1.0, media operations bypass the cloud entirely.
 
@@ -147,7 +135,7 @@ Cloud path (unchanged for non-media tools):
 ### Prerequisites for LAN media tools
 
 Each camera in `bosch_config.json` must have:
-- `local_ip`: LAN IP of the camera (e.g. `192.168.20.27`)
+- `local_ip`: LAN IP of the camera (e.g. `192.0.2.10`)
 - `local_username`: Digest auth username (obtained via mitmproxy or Bosch app)
 - `local_password`: Digest auth password
 
@@ -163,14 +151,12 @@ If any of these are missing, the tool raises `MCPError(code="local_unavailable")
 
 ### Trade-offs
 
-- **Pro:** No Bosch cloud sees LLM-triggered live images.
-- **Pro:** Faster — direct LAN HTTP is ~50–200 ms vs. cloud proxy ~500–2000 ms.
-- **Con:** MCP host must be on the LAN (not a remote cloud-hosted Claude instance).
-- **Con:** Requires per-camera local credentials (one-time mitmproxy capture).
+PRO: No Bosch cloud sees LLM-triggered live images. Faster — direct LAN HTTP is ~50–200 ms vs. cloud proxy ~500–2000 ms.
+CON: MCP host must be on the LAN (not a remote cloud-hosted Claude instance). Requires per-camera local credentials (one-time mitmproxy capture).
 
 ## Resources contract
 
-Three MCP resources are registered in `bosch_camera_mcp/resources.py`.
+Three MCP resources registered in `bosch_camera_mcp/resources.py`.
 
 | URI | Type | Returns | MIME |
 |---|---|---|---|
@@ -182,20 +168,20 @@ Three MCP resources are registered in `bosch_camera_mcp/resources.py`.
 
 **Static vs. template resources:** `bosch://cameras` has no URI parameters → registered as a `FunctionResource` (appears in `mcp.list_resources()`). The `{name}` variants have URI parameters → registered as `ResourceTemplate` entries (appear in `mcp.list_resource_templates()`).
 
-**Snapshot cache logic:** `bosch://cameras/{name}/snapshot.jpg` first checks `~/.cache/bosch-camera-mcp/snapshots/<safe_name>/` for the lexicographically latest `.jpg`. On cache hit the file is returned directly. On cache miss the `bosch_camera_snapshot` tool is called inline, which writes the new file and returns its path, which is then read back as bytes. This keeps caching logic in one place.
+**Snapshot cache logic:** `bosch://cameras/{name}/snapshot.jpg` first checks `~/.cache/bosch-camera-mcp/snapshots/<safe_name>/` for the lexicographically latest `.jpg`. On cache hit the file is returned directly. On cache miss the `bosch_camera_snapshot` tool is called inline, which writes the new file and returns its path, which is then read back as bytes.
 
 **Auth errors:** All three resources wrap `get_session_and_cameras()` and re-raise `reauth_required` as `MCPError(code="auth_expired")` so MCP clients receive a consistent error code regardless of whether the call originated from a tool or a resource.
 
 ## Prompts contract
 
-Two MCP prompts are registered in `bosch_camera_mcp/prompts.py`.
+Two MCP prompts registered in `bosch_camera_mcp/prompts.py`.
 
 | Name | Arguments | Purpose |
 |---|---|---|
 | `daily-camera-summary` | `hours: int = 24` | Multi-step report: iterate cameras, fetch events, summarise per type and time-slot, highlight anomalies |
 | `pre-leave-check` | _(none)_ | Pre-departure routine: snapshot + scene description + anomaly flags + indoor privacy recommendation |
 
-**Design principle:** Prompts are pure instruction templates — they return `list[UserMessage]` containing natural-language instructions that tell Claude which tools to call and in which order. They make no API calls themselves. This keeps prompts stateless, trivially testable, and reusable across transport modes.
+**Design principle:** Prompts are pure instruction templates — they return `list[UserMessage]` containing natural-language instructions that tell Claude which tools to call and in which order. They make no API calls themselves.
 
 **Message type:** Both prompts return `[UserMessage(...)]` from `mcp.server.fastmcp.prompts.base`. The `UserMessage` class accepts a plain `str` which is automatically wrapped in `TextContent(type="text", text=...)`.
 
@@ -212,7 +198,7 @@ class MCPError(Exception):
     camera: Optional[str]
 ```
 
-The MCP runtime translates these to JSON-RPC error responses with the `code` mapped to a friendly message. Critically, **no stack traces or Bosch API internals leak to the LLM** — that would invite prompt-injection chains.
+The MCP runtime translates these to JSON-RPC error responses with the `code` mapped to a friendly message. **No stack traces or Bosch API internals leak to the LLM** — that would invite prompt-injection chains.
 
 ## Auth lifecycle
 
@@ -226,11 +212,8 @@ The MCP server **never** initiates the OAuth browser flow. If a fresh token is n
 ## Snapshot return strategy
 
 Snapshots are binary blobs (~100–400 KB JPEGs). Two return modes:
-
-1. **`return_path=true` (default)**: server writes to `~/.cache/bosch-camera-mcp/snapshots/<camera>/<ts>.jpg`, returns `{path, method, timestamp}`. LLM can then reference the path via a follow-up resource read.
-2. **`return_inline=true`**: server returns the JPEG as MCP image content (base64). Use sparingly — large payloads inflate context.
-
-Default is `return_path` to keep the LLM context lean. Inline mode requires explicit tool argument.
+- **`return_path=true` (default)**: server writes to `~/.cache/bosch-camera-mcp/snapshots/<camera>/<ts>.jpg`, returns `{path, method, timestamp}`. LLM can then reference the path via a follow-up resource read.
+- **`return_inline=true`**: server returns the JPEG as MCP image content (base64). Use sparingly — large payloads inflate context.
 
 ## Concurrency
 
@@ -240,12 +223,10 @@ MCP tools run sequentially within one server instance (single asyncio event loop
 
 - Default: WARNING level to stderr (visible to Claude Desktop log viewer)
 - `--debug` flag: DEBUG level, redacted PII (token bytes → `***`, IPs → `1.2.3.x`)
-- Never log `bosch_config.json` contents
+- NEVER log `bosch_config.json` contents
 - Log path: `~/.cache/bosch-camera-mcp/server.log` (rotating, 5 × 1 MB)
 
 ## Transport
-
-### Available transports
 
 | CLI flag | FastMCP arg | Use case |
 |---|---|---|
@@ -260,31 +241,15 @@ FastMCP(name, host="127.0.0.1", port=8000, ...)  # host/port set on constructor 
 mcp.run(transport: Literal["stdio", "sse", "streamable-http"] = "stdio") -> None
 ```
 
-Host and port are stored in `mcp.settings.host` / `mcp.settings.port` and consumed by
-`run_streamable_http_async()` / `run_sse_async()` via uvicorn. The `main()` function
-mutates `mcp.settings` before calling `mcp.run()` when `--transport http|sse` is requested.
-The `mount_path` parameter of `mcp.run()` is not used (defaults to `/`).
+Host and port are stored in `mcp.settings.host` / `mcp.settings.port` and consumed by `run_streamable_http_async()` / `run_sse_async()` via uvicorn.
 
 ### Threat model — transport layer
 
-**stdio (default)**
-- Inherently local: server stdin/stdout are the only I/O path.
-- No network socket is opened. No firewall rules required.
-- Process lifetime is tied to the MCP host (Claude Code/Desktop).
+**stdio (default):** Inherently local — server stdin/stdout are the only I/O path. No network socket is opened. Process lifetime is tied to the MCP host (Claude Code/Desktop).
 
-**streamable-HTTP / SSE**
-- A uvicorn HTTP server is started; default bind is `127.0.0.1` (loopback only).
-- `--http-host 0.0.0.0` exposes the server to the LAN/WAN.
-  **Only set this in firewalled, trusted network environments.**
-  The server logs a WARNING when a non-localhost host is configured.
-- No auth middleware is included in the alpha. Do not expose to the internet
-  without an authenticating reverse proxy (nginx, Caddy, Cloudflare Tunnel).
-- The `/mcp` endpoint (streamable-HTTP) and `/sse` endpoint handle all MCP
-  JSON-RPC traffic. Both are unauthenticated in the current implementation.
+**streamable-HTTP / SSE:** A uvicorn HTTP server is started; default bind is `127.0.0.1` (loopback only). `--http-host 0.0.0.0` exposes the server to the LAN/WAN. **Only set this in firewalled, trusted network environments.** The server logs a WARNING when a non-localhost host is configured. No auth middleware is included in the alpha. Do not expose to the internet without an authenticating reverse proxy (nginx, Caddy, Cloudflare Tunnel). The `/mcp` endpoint (streamable-HTTP) and `/sse` endpoint handle all MCP JSON-RPC traffic. Both are unauthenticated in the current implementation.
 
 ## Packaging
-
-### Build artifacts
 
 Built with `python -m build` (setuptools backend):
 
@@ -302,17 +267,12 @@ bosch-smart-home-camera-mcp = "bosch_camera_mcp.server:main"
 
 ### pipx / uvx compatibility
 
-The package is designed for `pipx install` (persistent isolated env) and
-`uvx` (ephemeral one-shot). Both work because:
+The package is designed for `pipx install` (persistent isolated env) and `uvx` (ephemeral one-shot). Both work because:
 1. The entry point `bosch-smart-home-camera-mcp` is declared in `[project.scripts]`.
-2. All runtime dependencies (`mcp`, `pydantic`, `requests`, `urllib3`) are declared
-   in `[project.dependencies]` — no implicit sys.path assumptions.
+2. All runtime dependencies (`mcp`, `pydantic`, `requests`, `urllib3`) are declared in `[project.dependencies]` — no implicit sys.path assumptions.
 3. The package is pure-Python (`py3-none-any.whl`) — no compiled extensions.
 
-Note: the sister CLI (`bosch_camera.py`) is still loaded via sys.path injection
-(Option C). `pipx`/`uvx` users must set `BOSCH_CAMERA_CLI_PATH` or use `--config`
-with a pre-authenticated `bosch_config.json` from a separate CLI checkout.
-This limitation is tracked for v0.6.0 (Option B library refactor).
+Note: the sister CLI (`bosch_camera.py`) is still loaded via sys.path injection (Option C). `pipx`/`uvx` users must set `BOSCH_CAMERA_CLI_PATH` or use `--config` with a pre-authenticated `bosch_config.json` from a separate CLI checkout. This limitation is tracked for v0.6.0 (Option B library refactor).
 
 ## Security boundary
 

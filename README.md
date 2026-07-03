@@ -5,7 +5,7 @@
 > Reuses the proven reverse-engineered API client from the sister
 > [Python CLI tool](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python).
 >
-> **Status:** v1.5.3 — security patch: Bosch cloud CA pinned for the MCP cloud session (CWE-295). 32 tools + 3 resources + 2 prompts, stdio/SSE/streamable-HTTP, pipx/uvx-installable
+> **Status:** v1.5.5 — `camera_events` resource now classifies events via `eventType + eventTags`. 32 tools + 3 resources + 2 prompts, stdio/SSE/streamable-HTTP, pipx/uvx-installable
 
 [![License][license-shield]](LICENSE)
 [![Project Maintenance][maintenance-shield]][user_profile]
@@ -21,7 +21,7 @@
 - [Disclaimer](#disclaimer)
 - [Why a separate MCP server?](#why-a-separate-mcp-server)
 - [Architecture](#architecture)
-- [MCP tools](#mcp-tools-32-total-v153)
+- [MCP tools](#mcp-tools-32-total-v155)
 - [MCP resources](#mcp-resources)
 - [MCP prompts](#mcp-prompts)
 - [Privacy stance](#privacy-stance--media-operations-are-lan-only)
@@ -50,11 +50,11 @@ The sister projects target different runtimes:
 
 | Project | Version | Runtime | User-facing surface |
 |---|---|---|---|
-| [HA Integration](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | v13.5.14 | Home Assistant | UI entities, Lovelace card, automations |
-| [Python CLI](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | v10.10.2 | terminal | `bosch_camera ...` commands |
-| [ioBroker Adapter](https://github.com/mosandlt/iobroker.bosch-smart-home-camera) | v1.5.2 | ioBroker | datapoints, VIS-2 widgets (BoschCamera + BoschOverview), JSON-config admin UI |
-| [Node-RED nodes](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-NodeRED) | v0.2.2-alpha | Node-RED | flow nodes for automation pipelines |
-| **MCP Server (this repo)** | **v1.5.3** | **Claude clients** | **MCP tools callable from LLMs** |
+| [HA Integration](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | v14.4.1 | Home Assistant | UI entities, Lovelace card, automations |
+| [Python CLI](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | v10.10.4 | terminal | `bosch_camera ...` commands |
+| [ioBroker Adapter](https://github.com/mosandlt/iobroker.bosch-smart-home-camera) | v1.7.7 | ioBroker | datapoints, VIS-2 widgets (BoschCamera + BoschOverview), JSON-config admin UI |
+| [Node-RED nodes](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-NodeRED) | v0.2.5-alpha | Node-RED | flow nodes for automation pipelines |
+| **MCP Server (this repo)** | **v1.5.5** | **Claude clients** | **MCP tools callable from LLMs** |
 
 LLM use-cases the existing sisters don't cover:
 - "Take a snapshot of the garden camera and describe what you see."
@@ -121,7 +121,7 @@ sequenceDiagram
     Tool-->>Agent: {reachable: true, ip: "...", latency_ms: 12}
 ```
 
-## MCP tools (32 total, v1.5.3)
+## MCP tools (32 total, v1.5.5)
 
 | Tool | Description | Returns |
 |---|---|---|
@@ -356,11 +356,13 @@ Bosch-Smart-Home-Camera-Tool-MCP/
 - **v1.5.1** — fixed `_fetch_rcp_lan` (used a non-existent `aiohttp.DigestAuth` → `onvif_scopes` / `rcp_version` always failed over LAN; now `httpx.DigestAuth`). Test coverage 83→98%, fixtures sanitized, CI bumped to Node-24-native action majors. ✅
 - **v1.5.2** — dependency hygiene: dropped unused `aiohttp` runtime dep (test-only now), added `pyjwt>=2.13.0` / `starlette>=1.0.1` security floors (`pip-audit` clean), fixed a test that mocked the wrong HTTP stack. ✅
 - **v1.5.3** — security patch: pin Bosch cloud CA for the MCP cloud session (CWE-295, GHSA-6qh5-x5m5-vj6v); closes adjacent-network MITM on OAuth tokens. Local TOFU pinning unchanged. ✅
+- **v1.5.4** — event timestamps no longer drop the timezone offset: `/v11/events` returns offset-bearing timestamps (e.g. `+02:00[Europe/Berlin]`); the server now strips only the trailing `[zone]` suffix instead of truncating to 19 characters, preserving the explicit UTC offset. ✅
+- **v1.5.5** — `camera_events` resource now uses `eventType + eventTags` for correct event classification. ✅
 
 ## Releases
 
-Latest: **v1.5.3** — see the GitHub release page for full notes:
-[**v1.5.3 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP/releases/tag/v1.5.3)
+Latest: **v1.5.5** — see the GitHub release page for full notes:
+[**v1.5.5 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP/releases/tag/v1.5.5)
 
 | | |
 |---|---|
@@ -421,13 +423,13 @@ Part of a five-implementation family for Bosch Smart Home Cameras (plus an alpha
 
 | Implementation | Repo | Status |
 |---|---|---|
-| 🏆 Home Assistant Integration | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v13.5.14** · HA Quality Scale **Platinum** · production-ready |
-| 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | **v10.10.2** · Mini-NVR + SMB upload (BETA) · LAN-fallback (ping / --local) · PTZ presets · webhook delivery · capture / research / standalone |
-| 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | **v1.5.2** · stable · npm · privacy-toggle Digest rotation · MQTT bridge · PTZ presets · VIS-2 widgets (BoschCamera + BoschOverview) |
-| 🤖 **MCP Server** (this repo) | [Bosch-Smart-Home-Camera-Tool-MCP](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) | **v1.5.3** · cred-rotation · PTZ presets · TOFU cert pinning · cloud CA pinned (CWE-295) · LAN-ping + prefer_local · Claude Code / Claude Desktop integration |
-| 🔴 Node-RED nodes (alpha) | [Bosch-Smart-Home-Camera-Tool-NodeRED](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-NodeRED) | **v0.2.2-alpha** · 4 nodes (event / snapshot / privacy / config) |
+| 🏆 Home Assistant Integration | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v14.4.1** · HA Quality Scale **Platinum** · production-ready |
+| 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | **v10.10.4** · Mini-NVR + SMB upload (BETA) · LAN-fallback (ping / --local) · PTZ presets · webhook delivery · capture / research / standalone |
+| 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | **v1.7.7** · stable · npm · privacy-toggle Digest rotation · MQTT bridge · PTZ presets · VIS-2 widgets (BoschCamera + BoschOverview) |
+| 🤖 **MCP Server** (this repo) | [Bosch-Smart-Home-Camera-Tool-MCP](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) | **v1.5.5** · cred-rotation · PTZ presets · TOFU cert pinning · cloud CA pinned (CWE-295) · LAN-ping + prefer_local · Claude Code / Claude Desktop integration |
+| 🔴 Node-RED nodes (alpha) | [Bosch-Smart-Home-Camera-Tool-NodeRED](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-NodeRED) | **v0.2.5-alpha** · 4 nodes (event / snapshot / privacy / config) |
 
-Also: [Bosch Smart Home Camera — Python Frontend (NiceGUI)](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python-frontend) — v0.1.1-alpha (dashboard + camera detail + settings) — community interest welcome
+Also: [Bosch Smart Home Camera — Python Frontend (NiceGUI)](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python-frontend) — v0.1.5-alpha (dashboard + camera detail + settings) — community interest welcome
 
 HA stays the **reference implementation** — features land there first; the Python CLI, ioBroker Adapter and MCP Server catch up over time.
 
