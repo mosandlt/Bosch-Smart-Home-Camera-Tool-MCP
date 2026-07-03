@@ -455,6 +455,53 @@ def get_intrusion_config(session: requests.Session, cam_id: str) -> dict[str, An
     return {}  # unreachable
 
 
+def get_audio_detection_config(session: requests.Session, cam_id: str) -> dict[str, Any]:
+    """GET /v11/video_inputs/{cam_id}/audioDetectionConfig.
+
+    Returns raw JSON dict with at least {detectGlassBreak, detectFireAlarm}.
+    Gen2 Audio-Plus-only feature — cross-ported from HA integration v14.2.0
+    (switch.py BoschGlassBreakDetectionSwitch / BoschFireAlarmDetectionSwitch).
+    """
+    r = session.get(
+        f"{CLOUD_API}/v11/video_inputs/{cam_id}/audioDetectionConfig",
+        timeout=10,
+    )
+    if r.status_code == 200:
+        return dict(r.json())
+    _raise_api_error(r, f"get_audio_detection_config({cam_id})")
+    return {}  # unreachable
+
+
+def set_audio_detection_config(
+    session: requests.Session,
+    cam_id: str,
+    glass_break: Optional[bool] = None,
+    fire_alarm: Optional[bool] = None,
+) -> bool:
+    """PUT /v11/video_inputs/{cam_id}/audioDetectionConfig — partial update.
+
+    Fetches current config first, merges requested fields, then PUT the full
+    body. Both ``detectGlassBreak`` and ``detectFireAlarm`` must always be
+    sent together — sending only one silently resets the other one server-side
+    (same read-modify-write requirement as intrusionDetectionConfig).
+    """
+    current = get_audio_detection_config(session, cam_id)
+    if glass_break is not None:
+        current["detectGlassBreak"] = glass_break
+    if fire_alarm is not None:
+        current["detectFireAlarm"] = fire_alarm
+    r = session.put(
+        f"{CLOUD_API}/v11/video_inputs/{cam_id}/audioDetectionConfig",
+        json=current,
+        headers={"Content-Type": "application/json"},
+        timeout=10,
+    )
+    if r.status_code in (200, 201, 204):
+        return True
+    _raise_api_error(r, f"set_audio_detection_config({cam_id})")
+    return False  # unreachable
+
+
 def trigger_siren(
     session: requests.Session,
     cam_id: str,

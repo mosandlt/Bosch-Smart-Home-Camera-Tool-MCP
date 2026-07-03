@@ -24,7 +24,7 @@ class TestAllToolsAsync:
     async def test_every_registered_tool_is_async(self) -> None:
         """No registered tool may execute its body on the event-loop thread."""
         tools = mcp._tool_manager.list_tools()
-        assert len(tools) == 32
+        assert len(tools) == 34
         sync_tools = [t.name for t in tools if not t.is_async]
         assert sync_tools == [], (
             f"sync tools would block the event loop (FastMCP runs them inline): {sync_tools}"

@@ -131,6 +131,23 @@ class IntrusionConfig(BaseModel):
     )
 
 
+class AudioDetectionConfig(BaseModel):
+    """Glass-break + smoke/fire-alarm sound detection config returned by
+    bosch_camera_audio_detection_get.
+
+    Gen2 Audio-Plus feature (ported from HA integration v14.2.0).
+    """
+
+    glass_break: Optional[bool] = Field(
+        default=None,
+        description="Whether glass-break sound detection is enabled (Bosch API field 'detectGlassBreak')",
+    )
+    fire_alarm: Optional[bool] = Field(
+        default=None,
+        description="Whether smoke/fire-alarm sound detection is enabled (Bosch API field 'detectFireAlarm')",
+    )
+
+
 class WifiInfo(BaseModel):
     """WiFi signal information returned by bosch_camera_wifi."""
 
@@ -1076,6 +1093,85 @@ def bosch_camera_intrusion_set(
         mode=raw.get("mode"),
         sensitivity=raw.get("sensitivity"),
         distance=raw.get("distance"),
+    )
+
+
+@_blocking_tool
+def bosch_camera_audio_detection_get(camera: str) -> AudioDetectionConfig:
+    """Get the glass-break + smoke/fire-alarm sound detection config for one Gen2 camera.
+
+    Only available on Gen2 Audio-Plus cameras (``featureSupport.sound=true``).
+    Raises ``hardware_unsupported`` for Gen1 cameras. Ported from HA
+    integration v14.2.0 (BoschGlassBreakDetectionSwitch / BoschFireAlarmDetectionSwitch).
+
+    Returns ``{glass_break, fire_alarm}`` (Bosch API fields ``detectGlassBreak`` /
+    ``detectFireAlarm``).
+    """
+    br = _bridge()
+    cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    _require_gen2(cam_info, name, "audio detection (glass-break / fire-alarm)")
+
+    try:
+        raw = br.get_audio_detection_config(session, cam_info["id"])
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
+    return AudioDetectionConfig(
+        glass_break=raw.get("detectGlassBreak"),
+        fire_alarm=raw.get("detectFireAlarm"),
+    )
+
+
+@_blocking_tool
+def bosch_camera_audio_detection_set(
+    camera: str,
+    glass_break: Optional[bool] = None,
+    fire_alarm: Optional[bool] = None,
+) -> AudioDetectionConfig:
+    """Update glass-break and/or fire-alarm sound detection for one Gen2 camera.
+
+    Gen2 Audio-Plus-only feature — raises ``hardware_unsupported`` for Gen1
+    cameras. At least one of ``glass_break`` or ``fire_alarm`` must be provided.
+
+    Read-modify-write: the current config is fetched first, only the provided
+    field(s) are merged in, and both ``detectGlassBreak`` and ``detectFireAlarm``
+    are always sent together on the PUT — Bosch's API silently resets whichever
+    field is omitted (same requirement as intrusionDetectionConfig).
+
+    Returns the updated ``{glass_break, fire_alarm}`` after write.
+    """
+    br = _bridge()
+    cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    _require_gen2(cam_info, name, "audio detection (glass-break / fire-alarm)")
+
+    if glass_break is None and fire_alarm is None:
+        raise MCPError(
+            code="invalid_argument",
+            detail="At least one of glass_break or fire_alarm must be provided.",
+            camera=name,
+        )
+
+    try:
+        br.set_audio_detection_config(
+            session, cam_info["id"], glass_break=glass_break, fire_alarm=fire_alarm
+        )
+        raw = br.get_audio_detection_config(session, cam_info["id"])
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
+    return AudioDetectionConfig(
+        glass_break=raw.get("detectGlassBreak"),
+        fire_alarm=raw.get("detectFireAlarm"),
     )
 
 
