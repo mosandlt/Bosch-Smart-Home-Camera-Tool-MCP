@@ -5,7 +5,7 @@
 > Reuses the proven reverse-engineered API client from the sister
 > [Python CLI tool](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python).
 >
-> **Status:** v1.5.5 — `camera_events` resource now classifies events via `eventType + eventTags`. 32 tools + 3 resources + 2 prompts, stdio/SSE/streamable-HTTP, pipx/uvx-installable
+> **Status:** v1.6.0 — glass-break + smoke/fire-alarm sound detection tools (Gen2 Audio-Plus). 34 tools + 3 resources + 2 prompts, stdio/SSE/streamable-HTTP, pipx/uvx-installable
 
 [![License][license-shield]](LICENSE)
 [![Project Maintenance][maintenance-shield]][user_profile]
@@ -54,7 +54,7 @@ The sister projects target different runtimes:
 | [Python CLI](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | v10.10.4 | terminal | `bosch_camera ...` commands |
 | [ioBroker Adapter](https://github.com/mosandlt/iobroker.bosch-smart-home-camera) | v1.7.7 | ioBroker | datapoints, VIS-2 widgets (BoschCamera + BoschOverview), JSON-config admin UI |
 | [Node-RED nodes](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-NodeRED) | v0.2.5-alpha | Node-RED | flow nodes for automation pipelines |
-| **MCP Server (this repo)** | **v1.5.5** | **Claude clients** | **MCP tools callable from LLMs** |
+| **MCP Server (this repo)** | **v1.6.0** | **Claude clients** | **MCP tools callable from LLMs** |
 
 LLM use-cases the existing sisters don't cover:
 - "Take a snapshot of the garden camera and describe what you see."
@@ -121,7 +121,7 @@ sequenceDiagram
     Tool-->>Agent: {reachable: true, ip: "...", latency_ms: 12}
 ```
 
-## MCP tools (32 total, v1.5.5)
+## MCP tools (34 total, v1.6.0)
 
 | Tool | Description | Returns |
 |---|---|---|
@@ -140,6 +140,8 @@ sequenceDiagram
 | `bosch_camera_audio_set` | Set microphone level and/or speaker level 0-100 (Gen2 only) | `{microphone_level, speaker_level, intercom_enabled}` |
 | `bosch_camera_intrusion_get` | Get intrusion detection config: mode, sensitivity 0-7, distance 1-8 m (Gen2 only) | `{mode, sensitivity, distance}` |
 | `bosch_camera_intrusion_set` | Update intrusion detection mode/sensitivity/distance (Gen2 only) | `{mode, sensitivity, distance}` |
+| `bosch_camera_audio_detection_get` | Get glass-break + smoke/fire-alarm sound detection config (Gen2 Audio-Plus only) | `{glass_break, fire_alarm}` |
+| `bosch_camera_audio_detection_set` | Update glass-break and/or fire-alarm sound detection (Gen2 Audio-Plus only) | `{glass_break, fire_alarm}` |
 | `bosch_camera_wifi` | Get WiFi RSSI, SSID, and derived signal quality 0-100 % | `{rssi, ssid, signal_strength}` |
 | `bosch_camera_mjpeg_snapshot` | Direct LAN MJPEG snapshot via RTSP inst=3 (Gen2 only, ffmpeg, no cloud roundtrip) | `{path, method, timestamp, camera}` |
 | `bosch_camera_onvif_scopes` | Read ONVIF device scopes from camera LAN RCP 0x0a98 (Gen2 only) | `{name, hardware, profiles, raw_scopes}` |
@@ -358,11 +360,12 @@ Bosch-Smart-Home-Camera-Tool-MCP/
 - **v1.5.3** — security patch: pin Bosch cloud CA for the MCP cloud session (CWE-295, GHSA-6qh5-x5m5-vj6v); closes adjacent-network MITM on OAuth tokens. Local TOFU pinning unchanged. ✅
 - **v1.5.4** — event timestamps no longer drop the timezone offset: `/v11/events` returns offset-bearing timestamps (e.g. `+02:00[Europe/Berlin]`); the server now strips only the trailing `[zone]` suffix instead of truncating to 19 characters, preserving the explicit UTC offset. ✅
 - **v1.5.5** — `camera_events` resource now uses `eventType + eventTags` for correct event classification. ✅
+- **v1.6.0** — 2 new tools: `bosch_camera_audio_detection_get` / `bosch_camera_audio_detection_set` — glass-break + smoke/fire-alarm sound detection for Gen2 Audio-Plus cameras (cross-port from HA integration v14.2.0). 34 tools total. ✅
 
 ## Releases
 
-Latest: **v1.5.5** — see the GitHub release page for full notes:
-[**v1.5.5 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP/releases/tag/v1.5.5)
+Latest: **v1.6.0** — see the GitHub release page for full notes:
+[**v1.6.0 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP/releases/tag/v1.6.0)
 
 | | |
 |---|---|
@@ -426,7 +429,7 @@ Part of a five-implementation family for Bosch Smart Home Cameras (plus an alpha
 | 🏆 Home Assistant Integration | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v14.4.1** · HA Quality Scale **Platinum** · production-ready |
 | 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | **v10.10.4** · Mini-NVR + SMB upload (BETA) · LAN-fallback (ping / --local) · PTZ presets · webhook delivery · capture / research / standalone |
 | 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | **v1.7.7** · stable · npm · privacy-toggle Digest rotation · MQTT bridge · PTZ presets · VIS-2 widgets (BoschCamera + BoschOverview) |
-| 🤖 **MCP Server** (this repo) | [Bosch-Smart-Home-Camera-Tool-MCP](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) | **v1.5.5** · cred-rotation · PTZ presets · TOFU cert pinning · cloud CA pinned (CWE-295) · LAN-ping + prefer_local · Claude Code / Claude Desktop integration |
+| 🤖 **MCP Server** (this repo) | [Bosch-Smart-Home-Camera-Tool-MCP](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) | **v1.6.0** · cred-rotation · PTZ presets · TOFU cert pinning · cloud CA pinned (CWE-295) · LAN-ping + prefer_local · glass-break/fire-alarm detection · Claude Code / Claude Desktop integration |
 | 🔴 Node-RED nodes (alpha) | [Bosch-Smart-Home-Camera-Tool-NodeRED](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-NodeRED) | **v0.2.5-alpha** · 4 nodes (event / snapshot / privacy / config) |
 
 Also: [Bosch Smart Home Camera — Python Frontend (NiceGUI)](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python-frontend) — v0.1.5-alpha (dashboard + camera detail + settings) — community interest welcome

@@ -1,5 +1,19 @@
 # Changelog — Bosch Smart Home Camera MCP Server
 
+## [v1.6.0] - 2026-07-08
+
+### Added
+
+- **2 new tools: `bosch_camera_audio_detection_get` / `bosch_camera_audio_detection_set`** — glass-break and smoke/fire-alarm sound detection for Gen2 Audio-Plus cameras (`GET`/`PUT /v11/video_inputs/{id}/audioDetectionConfig`). Gated on `featureSupport.sound`; raises `hardware_unsupported` on Gen1 cameras. Read-modify-write on the setter — both `detectGlassBreak` and `detectFireAlarm` are always sent together on write, since Bosch's API silently resets whichever field is omitted. Cross-ported from HA integration v14.2.0 (`BoschGlassBreakDetectionSwitch` / `BoschFireAlarmDetectionSwitch`). 34 tools total.
+
+### Fixed
+
+- **Release workflow (`--generate-notes`) hardening** — fixed a crash and an awk shell-injection risk in the tag-triggered release workflow, and replaced a silent changelog-lookup fallback with an explicit failure so a missing changelog entry is caught instead of shipping an empty release body.
+
+### Internal
+
+- Trimmed padding/duplication in `docs/architecture.md` and corrected stale release-process notes.
+
 ## [v1.5.5] - 2026-06-29
 
 - **`camera_events` resource:** use `eventType + eventTags` for correct event classification (fixes #36 Fix D)
