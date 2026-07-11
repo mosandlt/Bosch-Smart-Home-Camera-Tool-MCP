@@ -154,11 +154,9 @@ async def rcp_local_write(
     if num:
         params["num"] = str(num)
 
-    # TOFU: verify fingerprint before sending any application data
-    try:
-        pin_or_verify_cam(cam_ip, cfg)
-    except CertPinningError:
-        raise
+    # TOFU: verify fingerprint before sending any application data. Propagates
+    # CertPinningError to the caller unchanged — no local handling needed here.
+    pin_or_verify_cam(cam_ip, cfg)
 
     current_user: Optional[str] = user
     current_password: Optional[str] = password
@@ -170,7 +168,10 @@ async def rcp_local_write(
             else None
         )
         try:
-            async with httpx.AsyncClient(verify=False, timeout=_RCP_TIMEOUT, auth=auth) as client:  # noqa: S501 — CA skipped; fingerprint pinned above
+            # noqa: S501 — CA skipped; fingerprint pinned above
+            async with httpx.AsyncClient(
+                verify=False, timeout=_RCP_TIMEOUT, auth=auth
+            ) as client:
                 resp = await client.get(base, params=params)
                 if resp.status_code == 200:
                     if b"<err>" in resp.content.lower():
@@ -323,13 +324,13 @@ async def refresh_local_creds(
     # Persist to disk
     if config_path:
         try:
-            with open(config_path) as fh:
+            with open(config_path, encoding="utf-8") as fh:
                 on_disk: dict[str, Any] = json.load(fh)
             disk_entry = on_disk.get("cameras", {}).get(cam_name)
             if disk_entry is not None:
                 disk_entry["local_username"] = new_user
                 disk_entry["local_password"] = new_pass
-            with open(config_path, "w") as fh:
+            with open(config_path, "w", encoding="utf-8") as fh:
                 json.dump(on_disk, fh, indent=2)
         except Exception as exc:  # noqa: BLE001
             _LOGGER.warning(

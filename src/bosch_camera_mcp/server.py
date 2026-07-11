@@ -20,6 +20,7 @@ import datetime
 import functools
 import logging
 import os
+import re
 import sys
 import threading
 from collections.abc import Callable
@@ -27,15 +28,15 @@ from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, Optional, ParamSpec, TypeVar
 
-if TYPE_CHECKING:
-    import requests
-
 from mcp.server.fastmcp import FastMCP
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from . import __version__
 from .errors import MCPError
 from .time_utils import clean_bosch_timestamp
+
+if TYPE_CHECKING:
+    import requests
 
 logger = logging.getLogger("bosch_camera_mcp")
 
@@ -229,6 +230,139 @@ class TokenStatus(BaseModel):
     )
 
 
+class MotionZone(BaseModel):
+    """One motion-detection zone rectangle (bosch_camera_motion_zones_get/set).
+
+    Range constraints (bug-hunt finding 2026-07-11: the _set tools originally
+    only checked that x/y/w/h keys were present, never that the values were
+    numeric-sane — unlike the sibling bosch_camera_intrusion_set, which
+    range-checks sensitivity/distance before ever calling the bridge). Also
+    used on the read path (via _zone_dicts_to_models) to skip a malformed
+    entry the API returns rather than crash the whole read.
+    """
+
+    x: float = Field(ge=0.0, le=1.0, description="Left edge, normalized 0.0-1.0")
+    y: float = Field(ge=0.0, le=1.0, description="Top edge, normalized 0.0-1.0")
+    w: float = Field(gt=0.0, le=1.0, description="Width, normalized 0.0-1.0")
+    h: float = Field(gt=0.0, le=1.0, description="Height, normalized 0.0-1.0")
+
+
+class PrivacyMask(BaseModel):
+    """One privacy-mask zone rectangle (bosch_camera_privacy_masks_get/set).
+
+    Same range constraints as MotionZone — see its docstring.
+    """
+
+    x: float = Field(ge=0.0, le=1.0, description="Left edge, normalized 0.0-1.0")
+    y: float = Field(ge=0.0, le=1.0, description="Top edge, normalized 0.0-1.0")
+    w: float = Field(gt=0.0, le=1.0, description="Width, normalized 0.0-1.0")
+    h: float = Field(gt=0.0, le=1.0, description="Height, normalized 0.0-1.0")
+
+
+class Rule(BaseModel):
+    """One camera automation (time-schedule) rule."""
+
+    id: Optional[str] = Field(default=None, description="Rule id (Bosch API field 'id')")
+    name: str = Field(description="Rule display name")
+    active: bool = Field(description="Whether the rule is currently active")
+    start: str = Field(description="Start time HH:MM:SS (Bosch API field 'startTime')")
+    end: str = Field(description="End time HH:MM:SS (Bosch API field 'endTime')")
+    days: list[int] = Field(description="Active weekdays, 0=Monday .. 6=Sunday")
+
+
+class Friend(BaseModel):
+    """One camera-sharing friend/invitation entry."""
+
+    id: str = Field(description="Friend id (Bosch API field 'id')")
+    email: Optional[str] = Field(default=None, description="Friend's email address")
+    nickname: Optional[str] = Field(default=None, description="Display nickname")
+    status: Optional[str] = Field(
+        default=None, description="Invitation status, e.g. ACCEPTED/PENDING"
+    )
+    shared_cameras: list[str] = Field(
+        default_factory=list, description="Camera ids currently shared with this friend"
+    )
+
+
+class FirmwareStatus(BaseModel):
+    """Firmware status returned by bosch_camera_firmware_status/install."""
+
+    camera: str = Field(description="Camera name")
+    current: Optional[str] = Field(default=None, description="Currently installed version")
+    up_to_date: Optional[bool] = Field(
+        default=None, description="Whether the camera is already on the latest firmware"
+    )
+    update_available: Optional[str] = Field(
+        default=None, description="Pending update's target version, if any"
+    )
+    installing: bool = Field(
+        default=False, description="Whether an install is currently in progress"
+    )
+
+
+class LightingSchedule(BaseModel):
+    """Lighting schedule returned by bosch_camera_lighting_schedule_get/set.
+
+    Outdoor (Eyes) cameras with LED light only. API: GET/PUT
+    /v11/video_inputs/{id}/lighting_options.
+    """
+
+    schedule_status: Optional[str] = Field(
+        default=None, description="Bosch API field 'scheduleStatus', e.g. FOLLOW_SCHEDULE"
+    )
+    on_time: Optional[str] = Field(
+        default=None, description="Light-on time HH:MM:SS (Bosch API field 'generalLightOnTime')"
+    )
+    off_time: Optional[str] = Field(
+        default=None, description="Light-off time HH:MM:SS (Bosch API field 'generalLightOffTime')"
+    )
+    darkness_threshold: Optional[float] = Field(
+        default=None, description="0.0-1.0 ambient-darkness trigger threshold"
+    )
+    light_on_motion: Optional[bool] = Field(
+        default=None, description="Whether motion also triggers the light"
+    )
+    light_on_motion_followup_secs: Optional[int] = Field(
+        default=None, description="Seconds the light stays on after motion (read-only)"
+    )
+    front_illuminator_on: Optional[bool] = Field(
+        default=None, description="Front illuminator state during general-light-on (read-only)"
+    )
+    front_illuminator_intensity: Optional[int] = Field(
+        default=None, description="Front illuminator intensity (read-only)"
+    )
+    wallwasher_on: Optional[bool] = Field(
+        default=None, description="Wallwasher light state during general-light-on (read-only)"
+    )
+
+
+class SirenDuration(BaseModel):
+    """Siren alarm duration returned by bosch_camera_siren_duration_set."""
+
+    alarm_delay_seconds: int = Field(
+        description="Configured siren duration in seconds (Bosch API field 'alarmDelayInSeconds')"
+    )
+
+
+class IntercomSession(BaseModel):
+    """Listen-audio session tunnel returned by bosch_camera_intercom_open.
+
+    This is a **listen-only** audio tunnel (camera microphone -> caller).
+    True two-way talk is not exposed via the Bosch cloud API (same
+    limitation as the Python CLI's own `intercom` command).
+    """
+
+    camera: str = Field(description="Canonical camera name")
+    rtsps_url: str = Field(
+        description="Cloud-proxy RTSPS URL with enableaudio=1, consumable by ffmpeg/ffplay/VLC"
+    )
+    duration: int = Field(description="Requested session duration in seconds")
+    speaker_level_set: Optional[int] = Field(
+        default=None,
+        description="Speaker level actually applied (0-100), or None if not requested/failed",
+    )
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 _P = ParamSpec("_P")
@@ -286,7 +420,7 @@ def _build_status(
     name: str,
     cam_info: dict[str, Any],
     session: requests.Session,
-    cfg: dict[str, Any],
+    _cfg: dict[str, Any],
 ) -> CameraStatus:
     """Build a CameraStatus model for one camera."""
     import bosch_camera as bc
@@ -332,7 +466,7 @@ def _build_status(
 @_blocking_tool
 def bosch_camera_list() -> list[CameraSummary]:
     """List all configured Bosch cameras with their online status."""
-    cfg, session, cameras = _get_session()
+    _cfg, session, cameras = _get_session()
 
     import bosch_camera as bc
 
@@ -420,7 +554,7 @@ def bosch_camera_snapshot(camera: str) -> SnapshotResult:
     ~/.cache/bosch-camera-mcp/snapshots/<camera>/<iso-ts>.jpg.
     """
     br = _bridge()
-    cfg, session, cameras = _get_session()
+    _cfg, _session, cameras = _get_session()
     br.ensure_cli_importable()
 
     import bosch_camera as bc
@@ -477,7 +611,7 @@ def bosch_camera_stream_url(camera: str) -> StreamUrlResult:
     from urllib.parse import quote as _q
 
     br = _bridge()
-    cfg, session, cameras = _get_session()
+    _cfg, _session, cameras = _get_session()
     br.ensure_cli_importable()
 
     name, cam_info = br._resolve_cam(cameras, camera)
@@ -512,12 +646,12 @@ def bosch_camera_events(camera: str, limit: int = 10) -> list[dict[str, Any]]:
     Each item contains: event_id, type, timestamp_iso, has_clip.
     """
     br = _bridge()
-    cfg, session, cameras = _get_session()
+    _cfg, session, cameras = _get_session()
     br.ensure_cli_importable()
 
     import bosch_camera as bc
 
-    name, cam_info = br._resolve_cam(cameras, camera)
+    _name, cam_info = br._resolve_cam(cameras, camera)
     cam_id = cam_info["id"]
 
     raw_events = bc.api_get_events(session, cam_id, limit=max(limit, 1))
@@ -814,8 +948,8 @@ def bosch_camera_siren_trigger(camera: str, stop: bool = False) -> CameraStatus:
       Body: ``{"status": "ON"|"OFF"}``. 75 dB integrated siren.
 
     The siren plays for the camera-side configured duration (typically 30–60 s
-    on Gen2). To change the duration on Gen2, use the HA integration's
-    ``number.bosch_<cam>_sirenen_dauer`` entity (range 10–300 s).
+    on Gen2). To change the duration, use ``bosch_camera_siren_duration_set``
+    (range 10–300 s) before triggering.
 
     Raises ``hardware_unsupported`` for outdoor cameras and Gen1 outdoor models.
     Raises ``privacy_blocked`` when the camera is in privacy mode (Gen2 panic
@@ -857,6 +991,208 @@ def bosch_camera_siren_trigger(camera: str, stop: bool = False) -> CameraStatus:
 
     logger.info("siren_trigger(%s, stop=%s, model=%s): OK", name, stop, model)
     return _build_status(name, cam_info, session, cfg)
+
+
+@_blocking_tool
+def bosch_camera_siren_duration_set(camera: str, seconds: int) -> SirenDuration:
+    """Set the siren alarm duration for one camera (Gen2 Indoor II only).
+
+    Read-modify-write on ``GET/PUT /v11/video_inputs/{id}/alarm_settings``
+    (field ``alarmDelayInSeconds``) — existing fields in that config are
+    preserved. Does **not** trigger the siren itself; call
+    ``bosch_camera_siren_trigger`` afterwards to fire it with the new duration.
+
+    Raises ``hardware_unsupported`` for non-Gen2-Indoor-II cameras (matches
+    ``bosch_camera_siren_trigger``'s own gating). Raises ``invalid_argument``
+    if ``seconds`` is outside 10-300. Raises ``privacy_blocked`` when the
+    camera is in privacy mode.
+
+    Args:
+        camera: Camera name (case-insensitive).
+        seconds: New siren duration, 10-300 seconds inclusive.
+    """
+    br = _bridge()
+    _cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    model = cam_info.get("model", "")
+    if model != "HOME_Eyes_Indoor":
+        raise MCPError(
+            code="hardware_unsupported",
+            detail=(
+                f"Camera '{name}' (model '{model or 'unknown'}') has no siren duration support. "
+                "Only Gen2 Indoor II (HOME_Eyes_Indoor) exposes /alarm_settings."
+            ),
+            camera=name,
+        )
+    if not 10 <= seconds <= 300:
+        raise MCPError(
+            code="invalid_argument",
+            detail=f"seconds must be between 10 and 300 (got {seconds}).",
+            camera=name,
+        )
+
+    try:
+        result = br.set_siren_duration(session, cam_info["id"], seconds)
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
+
+    logger.info("siren_duration_set(%s, seconds=%s): OK", name, seconds)
+    return SirenDuration(alarm_delay_seconds=result.get("alarmDelayInSeconds", seconds))
+
+
+@_blocking_tool
+def bosch_camera_lighting_schedule_get(camera: str) -> LightingSchedule:
+    """Get the LED lighting schedule for one outdoor (Eyes) camera.
+
+    API: ``GET /v11/video_inputs/{id}/lighting_options``. Only available on
+    outdoor cameras with LED light — raises ``hardware_unsupported`` (HTTP 442)
+    on cameras without this feature, and ``api_unreachable`` (HTTP 444) if the
+    camera is offline.
+    """
+    br = _bridge()
+    _cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    try:
+        raw = br.get_lighting_schedule(session, cam_info["id"])
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
+    return _lighting_dict_to_model(raw)
+
+
+@_blocking_tool
+def bosch_camera_lighting_schedule_set(
+    camera: str,
+    on_time: Optional[str] = None,
+    off_time: Optional[str] = None,
+    light_on_motion: Optional[bool] = None,
+    darkness_threshold: Optional[float] = None,
+) -> LightingSchedule:
+    """Update the LED lighting schedule for one outdoor (Eyes) camera.
+
+    Read-modify-write on ``GET/PUT /v11/video_inputs/{id}/lighting_options``.
+    At least one of ``on_time``/``off_time``/``light_on_motion``/
+    ``darkness_threshold`` must be provided. Writing any field forces
+    ``scheduleStatus`` to ``FOLLOW_SCHEDULE`` (matches CLI behavior).
+
+    Only available on outdoor cameras with LED light — raises
+    ``hardware_unsupported`` (HTTP 442) otherwise, ``api_unreachable``
+    (HTTP 444) if the camera is offline.
+
+    Args:
+        camera: Camera name (case-insensitive).
+        on_time: Light-on time, "HH:MM" or "HH:MM:SS".
+        off_time: Light-off time, "HH:MM" or "HH:MM:SS".
+        light_on_motion: Whether motion also triggers the light.
+        darkness_threshold: Ambient-darkness trigger threshold, 0.0-1.0.
+    """
+    if on_time is None and off_time is None and light_on_motion is None and darkness_threshold is None:
+        raise MCPError(
+            code="invalid_argument",
+            detail="At least one of on_time, off_time, light_on_motion, darkness_threshold must be provided.",
+        )
+    if darkness_threshold is not None and not 0.0 <= darkness_threshold <= 1.0:
+        raise MCPError(
+            code="invalid_argument",
+            detail=f"darkness_threshold must be between 0.0 and 1.0 (got {darkness_threshold}).",
+        )
+
+    br = _bridge()
+    _cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    if on_time is not None:
+        _validate_hhmm(on_time, "on_time", name)
+    if off_time is not None:
+        _validate_hhmm(off_time, "off_time", name)
+    try:
+        raw = br.set_lighting_schedule(
+            session,
+            cam_info["id"],
+            on_time=on_time,
+            off_time=off_time,
+            light_on_motion=light_on_motion,
+            darkness_threshold=darkness_threshold,
+        )
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
+    logger.info("lighting_schedule_set(%s): OK", name)
+    return _lighting_dict_to_model(raw)
+
+
+@_blocking_tool
+def bosch_camera_intercom_open(
+    camera: str,
+    duration: int = 60,
+    speaker_level: Optional[int] = None,
+) -> IntercomSession:
+    """Open a listen-audio session tunnel to a camera (cloud proxy).
+
+    **Listen-only** — returns an RTSPS URL streaming the camera's microphone
+    audio to the caller. True two-way talk (caller mic -> camera speaker) is
+    not exposed via the Bosch cloud API (same limitation as the Python CLI's
+    own `intercom` command — it falls back to `ffplay` for listen-only
+    playback). The returned URL is consumable by ffmpeg/ffplay/VLC; the MCP
+    server does not itself play audio.
+
+    Flow: optionally sets the camera's speaker level (full-body PUT to
+    ``/audio``, preserving other fields), then opens a live connection via
+    ``PUT /v11/video_inputs/{id}/connection`` (tries REMOTE then LOCAL) and
+    builds an ``rtsps://`` URL with ``enableaudio=1``.
+
+    Args:
+        camera: Camera name (case-insensitive).
+        duration: Requested session duration in seconds (embedded in the URL
+            as ``maxSessionDuration``), default 60.
+        speaker_level: Optional 0-100 speaker level to set before opening
+            the session.
+    """
+    if speaker_level is not None and not 0 <= speaker_level <= 100:
+        raise MCPError(
+            code="invalid_argument",
+            detail=f"speaker_level must be between 0 and 100 (got {speaker_level}).",
+        )
+    if duration <= 0:
+        raise MCPError(
+            code="invalid_argument",
+            detail=f"duration must be positive (got {duration}).",
+        )
+
+    br = _bridge()
+    _cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    try:
+        result = br.open_intercom_session(
+            session, cam_info["id"], duration=duration, speaker_level=speaker_level
+        )
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
+
+    logger.info("intercom_open(%s, duration=%s): OK", name, duration)
+    return IntercomSession(
+        camera=name,
+        rtsps_url=result["rtsps_url"],
+        duration=result["duration"],
+        speaker_level_set=result.get("speaker_level_set"),
+    )
 
 
 @_blocking_tool
@@ -921,7 +1257,7 @@ def bosch_camera_audio_get(camera: str) -> AudioSettings:
     (e.g. Outdoor II).
     """
     br = _bridge()
-    cfg, session, cameras = _get_session()
+    _cfg, session, cameras = _get_session()
     br.ensure_cli_importable()
 
     name, cam_info = br._resolve_cam(cameras, camera)
@@ -958,7 +1294,7 @@ def bosch_camera_audio_set(
     Returns updated ``{microphone_level, speaker_level, intercom_enabled}`` after write.
     """
     br = _bridge()
-    cfg, session, cameras = _get_session()
+    _cfg, session, cameras = _get_session()
     br.ensure_cli_importable()
 
     name, cam_info = br._resolve_cam(cameras, camera)
@@ -972,7 +1308,7 @@ def bosch_camera_audio_set(
         )
 
     for label, val in (("mic_level", mic_level), ("speaker_level", speaker_level)):
-        if val is not None and not (0 <= val <= 100):
+        if val is not None and not 0 <= val <= 100:
             raise MCPError(
                 code="invalid_argument",
                 detail=f"{label}={val} is out of range. Must be 0-100.",
@@ -1008,7 +1344,7 @@ def bosch_camera_intrusion_get(camera: str) -> IntrusionConfig:
     ``distance``: detection range in meters, 1-8 (Bosch API limit).
     """
     br = _bridge()
-    cfg, session, cameras = _get_session()
+    _cfg, session, cameras = _get_session()
     br.ensure_cli_importable()
 
     name, cam_info = br._resolve_cam(cameras, camera)
@@ -1053,7 +1389,7 @@ def bosch_camera_intrusion_set(
     Returns the updated ``{mode, sensitivity, distance}`` after write.
     """
     br = _bridge()
-    cfg, session, cameras = _get_session()
+    _cfg, session, cameras = _get_session()
     br.ensure_cli_importable()
 
     name, cam_info = br._resolve_cam(cameras, camera)
@@ -1066,13 +1402,13 @@ def bosch_camera_intrusion_set(
             camera=name,
         )
 
-    if sensitivity is not None and not (0 <= sensitivity <= 7):
+    if sensitivity is not None and not 0 <= sensitivity <= 7:
         raise MCPError(
             code="invalid_argument",
             detail=f"sensitivity={sensitivity} is out of range. Must be 0-7.",
             camera=name,
         )
-    if distance is not None and not (1 <= distance <= 8):
+    if distance is not None and not 1 <= distance <= 8:
         raise MCPError(
             code="invalid_argument",
             detail=f"distance={distance} is out of range. Must be 1-8 (Bosch API limit).",
@@ -1108,7 +1444,7 @@ def bosch_camera_audio_detection_get(camera: str) -> AudioDetectionConfig:
     ``detectFireAlarm``).
     """
     br = _bridge()
-    cfg, session, cameras = _get_session()
+    _cfg, session, cameras = _get_session()
     br.ensure_cli_importable()
 
     name, cam_info = br._resolve_cam(cameras, camera)
@@ -1146,7 +1482,7 @@ def bosch_camera_audio_detection_set(
     Returns the updated ``{glass_break, fire_alarm}`` after write.
     """
     br = _bridge()
-    cfg, session, cameras = _get_session()
+    _cfg, session, cameras = _get_session()
     br.ensure_cli_importable()
 
     name, cam_info = br._resolve_cam(cameras, camera)
@@ -1191,10 +1527,10 @@ def bosch_camera_wifi(camera: str) -> WifiInfo:
     whether to force ``prefer_local=True`` on privacy/light writes.
     """
     br = _bridge()
-    cfg, session, cameras = _get_session()
+    _cfg, session, cameras = _get_session()
     br.ensure_cli_importable()
 
-    name, cam_info = br._resolve_cam(cameras, camera)
+    _name, cam_info = br._resolve_cam(cameras, camera)
     raw = br.get_wifi_info(session, cam_info["id"])
     rssi_raw = raw.get("rssi") or raw.get("signalStrength")
     rssi: Optional[int] = int(rssi_raw) if rssi_raw is not None else None
@@ -1275,7 +1611,7 @@ async def bosch_camera_mjpeg_snapshot(camera: str) -> dict[str, Any]:
     from urllib.parse import quote as _q
 
     br = _bridge()
-    cfg, session, cameras = await asyncio.to_thread(_locked, _get_session)
+    _cfg, _session, cameras = await asyncio.to_thread(_locked, _get_session)
     br.ensure_cli_importable()
 
     name, cam_info = br._resolve_cam(cameras, camera)
@@ -1338,12 +1674,12 @@ async def bosch_camera_mjpeg_snapshot(camera: str) -> dict[str, Any]:
                 ),
                 camera=name,
             )
-    except asyncio.TimeoutError:
+    except asyncio.TimeoutError as exc:
         raise MCPError(
             code="local_unavailable",
             detail=f"ffmpeg MJPEG snapshot timed out for {name!r} after 20 s.",
             camera=name,
-        )
+        ) from exc
 
     return {
         "path": str(out_path),
@@ -1362,7 +1698,7 @@ async def bosch_camera_onvif_scopes(camera: str) -> dict[str, Any]:
     Gen2 only (HOME_Eyes_Outdoor / HOME_Eyes_Indoor).
     """
     br = _bridge()
-    cfg, session, cameras = await asyncio.to_thread(_locked, _get_session)
+    _cfg, _session, cameras = await asyncio.to_thread(_locked, _get_session)
     br.ensure_cli_importable()
 
     name, cam_info = br._resolve_cam(cameras, camera)
@@ -1428,7 +1764,7 @@ async def bosch_camera_rcp_version(camera: str) -> dict[str, Any]:
     Useful for diagnosing protocol compatibility. Requires local_ip + local credentials.
     """
     br = _bridge()
-    cfg, session, cameras = await asyncio.to_thread(_locked, _get_session)
+    _cfg, _session, cameras = await asyncio.to_thread(_locked, _get_session)
     br.ensure_cli_importable()
 
     name, cam_info = br._resolve_cam(cameras, camera)
@@ -1482,7 +1818,7 @@ def bosch_camera_feature_flags() -> dict[str, Any]:
     Useful for discovering which Bosch platform features are active for this account.
     """
     br = _bridge()
-    cfg, session, cameras = _get_session()
+    _cfg, session, _cameras = _get_session()
     br.ensure_cli_importable()
 
     from .adapters.cli_bridge import CLOUD_API  # noqa: PLC0415
@@ -1516,7 +1852,7 @@ def bosch_camera_motion_get(camera: str) -> MotionConfig:
     API: GET /v11/video_inputs/{id}/motion.
     """
     br = _bridge()
-    cfg, session, cameras = _get_session()
+    _cfg, session, cameras = _get_session()
     br.ensure_cli_importable()
 
     name, cam_info = br._resolve_cam(cameras, camera)
@@ -1550,7 +1886,7 @@ def bosch_camera_motion_set(
     API: PUT /v11/video_inputs/{id}/motion.
     """
     br = _bridge()
-    cfg, session, cameras = _get_session()
+    _cfg, session, cameras = _get_session()
     br.ensure_cli_importable()
 
     name, cam_info = br._resolve_cam(cameras, camera)
@@ -1562,13 +1898,13 @@ def bosch_camera_motion_set(
             camera=name,
         )
 
-    VALID_SENSITIVITIES = {"OFF", "LOW", "MEDIUM_LOW", "MEDIUM_HIGH", "HIGH", "SUPER_HIGH"}
-    if sensitivity is not None and sensitivity.upper() not in VALID_SENSITIVITIES:
+    valid_sensitivities = {"OFF", "LOW", "MEDIUM_LOW", "MEDIUM_HIGH", "HIGH", "SUPER_HIGH"}
+    if sensitivity is not None and sensitivity.upper() not in valid_sensitivities:
         raise MCPError(
             code="invalid_argument",
             detail=(
                 f"sensitivity={sensitivity!r} is not valid. "
-                f"Must be one of: {', '.join(sorted(VALID_SENSITIVITIES))}."
+                f"Must be one of: {', '.join(sorted(valid_sensitivities))}."
             ),
             camera=name,
         )
@@ -1600,7 +1936,7 @@ def bosch_camera_recording_get(camera: str) -> RecordingOptions:
     API: GET /v11/video_inputs/{id}/recording_options.
     """
     br = _bridge()
-    cfg, session, cameras = _get_session()
+    _cfg, session, cameras = _get_session()
     br.ensure_cli_importable()
 
     name, cam_info = br._resolve_cam(cameras, camera)
@@ -1624,7 +1960,7 @@ def bosch_camera_recording_set(camera: str, sound_on: bool) -> RecordingOptions:
     API: PUT /v11/video_inputs/{id}/recording_options  Body: ``{"recordSound": bool}``.
     """
     br = _bridge()
-    cfg, session, cameras = _get_session()
+    _cfg, session, cameras = _get_session()
     br.ensure_cli_importable()
 
     name, cam_info = br._resolve_cam(cameras, camera)
@@ -1649,7 +1985,7 @@ def bosch_camera_autofollow_get(camera: str) -> AutofollowConfig:
     API: GET /v11/video_inputs/{id}/autofollow.
     """
     br = _bridge()
-    cfg, session, cameras = _get_session()
+    _cfg, session, cameras = _get_session()
     br.ensure_cli_importable()
 
     name, cam_info = br._resolve_cam(cameras, camera)
@@ -1684,7 +2020,7 @@ def bosch_camera_autofollow_set(camera: str, enabled: bool) -> AutofollowConfig:
     API: PUT /v11/video_inputs/{id}/autofollow  Body: ``{"result": bool}``.
     """
     br = _bridge()
-    cfg, session, cameras = _get_session()
+    _cfg, session, cameras = _get_session()
     br.ensure_cli_importable()
 
     name, cam_info = br._resolve_cam(cameras, camera)
@@ -1719,7 +2055,7 @@ def bosch_camera_privacy_sound_get(camera: str) -> PrivacySoundConfig:
     API: GET /v11/video_inputs/{id}/privacy_sound_override.
     """
     br = _bridge()
-    cfg, session, cameras = _get_session()
+    _cfg, session, cameras = _get_session()
     br.ensure_cli_importable()
 
     name, cam_info = br._resolve_cam(cameras, camera)
@@ -1743,7 +2079,7 @@ def bosch_camera_privacy_sound_set(camera: str, enabled: bool) -> PrivacySoundCo
     API: PUT /v11/video_inputs/{id}/privacy_sound_override  Body: ``{"result": bool}``.
     """
     br = _bridge()
-    cfg, session, cameras = _get_session()
+    _cfg, session, cameras = _get_session()
     br.ensure_cli_importable()
 
     name, cam_info = br._resolve_cam(cameras, camera)
@@ -1768,7 +2104,7 @@ def bosch_camera_unread_get(camera: str) -> UnreadCount:
     Returns ``{camera, count}``.
     """
     br = _bridge()
-    cfg, session, cameras = _get_session()
+    _cfg, session, cameras = _get_session()
     br.ensure_cli_importable()
 
     from .adapters.cli_bridge import CLOUD_API  # noqa: PLC0415
@@ -1805,7 +2141,7 @@ def bosch_camera_health_check_all() -> list[CameraHealthEntry]:
     so a single failing camera does not abort the entire check.
     """
     br = _bridge()
-    cfg, session, cameras = _get_session()
+    _cfg, session, cameras = _get_session()
     br.ensure_cli_importable()
 
     import bosch_camera as bc
@@ -1896,9 +2232,8 @@ def bosch_camera_token_status() -> TokenStatus:
     """
     import base64 as _b64
     import json as _json_mod
-    import datetime as _dt
 
-    cfg, session, cameras = _get_session()
+    cfg, _session, _cameras = _get_session()
 
     token = cfg.get("account", {}).get("bearer_token", "").strip()
     if not token:
@@ -1913,13 +2248,478 @@ def bosch_camera_token_status() -> TokenStatus:
         exp = info.get("exp", 0)
         email = info.get("email") or info.get("preferred_username")
         if exp:
-            exp_dt = _dt.datetime.fromtimestamp(exp)
-            diff = exp_dt - _dt.datetime.now()
+            exp_dt = datetime.datetime.fromtimestamp(exp)
+            diff = exp_dt - datetime.datetime.now()
             mins = int(diff.total_seconds() / 60)
             return TokenStatus(valid=mins > 0, expires_in_min=mins, email=email)
         return TokenStatus(valid=True, expires_in_min=None, email=email)
     except Exception:
         return TokenStatus(valid=False, expires_in_min=None, email=None)
+
+
+# ── v1.7.0 tools: motion zones, privacy masks, rules, friends, firmware install ─
+# Family-parity closeout (docs/family-parity-plan.md §2b, 2026-07-11): these
+# mirror the sister CLI's cmd_zones/cmd_privacy_masks/cmd_rules/cmd_friends/
+# cmd_firmware_update read+write commands, hitting the same /v11 cloud
+# endpoints (session-authenticated, same as every other write tool above).
+
+
+def _zone_dicts_to_models(zones: list[dict[str, Any]]) -> list[MotionZone]:
+    """Coerce raw {x,y,w,h} dicts from the API into MotionZone models, skipping
+    any malformed entry rather than failing the whole read.
+
+    Catches both a missing key (KeyError/TypeError on the dict subscript) AND
+    a present-but-wrong-typed value (pydantic ValidationError on model
+    construction, e.g. ``"x": "not a number"`` or ``"x": None``) — bug-hunt
+    finding 2026-07-11: only the missing-key case was originally handled,
+    so a malformed-but-present value crashed the whole read instead of being
+    skipped as documented.
+    """
+    out: list[MotionZone] = []
+    for z in zones:
+        try:
+            out.append(MotionZone(x=z["x"], y=z["y"], w=z["w"], h=z["h"]))
+        except (KeyError, TypeError, ValidationError):
+            continue
+    return out
+
+
+def _mask_dicts_to_models(masks: list[dict[str, Any]]) -> list[PrivacyMask]:
+    """Coerce raw {x,y,w,h} dicts from the API into PrivacyMask models, skipping
+    any malformed entry rather than failing the whole read. See
+    _zone_dicts_to_models for why both KeyError/TypeError and pydantic
+    ValidationError must be caught."""
+    out: list[PrivacyMask] = []
+    for m in masks:
+        try:
+            out.append(PrivacyMask(x=m["x"], y=m["y"], w=m["w"], h=m["h"]))
+        except (KeyError, TypeError, ValidationError):
+            continue
+    return out
+
+
+def _lighting_dict_to_model(raw: dict[str, Any]) -> LightingSchedule:
+    return LightingSchedule(
+        schedule_status=raw.get("scheduleStatus"),
+        on_time=raw.get("generalLightOnTime"),
+        off_time=raw.get("generalLightOffTime"),
+        darkness_threshold=raw.get("darknessThreshold"),
+        light_on_motion=raw.get("lightOnMotion"),
+        light_on_motion_followup_secs=raw.get("lightOnMotionFollowUpTimeSeconds"),
+        front_illuminator_on=raw.get("frontIlluminatorInGeneralLightOn"),
+        front_illuminator_intensity=raw.get("frontIlluminatorGeneralLightIntensity"),
+        wallwasher_on=raw.get("wallwasherInGeneralLightOn"),
+    )
+
+
+def _rule_dict_to_model(raw: dict[str, Any]) -> Rule:
+    return Rule(
+        id=raw.get("id"),
+        name=raw.get("name", ""),
+        active=bool(raw.get("isActive", False)),
+        start=raw.get("startTime", ""),
+        end=raw.get("endTime", ""),
+        days=list(raw.get("weekdays", [])),
+    )
+
+
+_HHMM_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$")
+
+
+def _validate_hhmm(value: str, field: str, cam_name: str) -> None:
+    """Raise invalid_argument unless *value* is a well-formed 24h HH:MM[:SS] time.
+
+    Bug-hunt finding 2026-07-11: rules_add/rules_edit previously forwarded
+    ``start``/``end`` straight to Bosch with zero format checking — a garbage
+    string like "25:99" or "foo" would only surface as an opaque
+    api_unreachable from Bosch's own rejection instead of a clear
+    invalid_argument up front. HH:MM:SS is also accepted because
+    cli_bridge.edit_rule() passes an already-``:SS``-qualified value through
+    unchanged (see its docstring).
+    """
+    if not _HHMM_RE.match(value):
+        raise MCPError(
+            code="invalid_argument",
+            detail=f"{field}={value!r} is not a valid 24h HH:MM time (e.g. '22:00').",
+            camera=cam_name,
+        )
+
+
+def _friend_dict_to_model(raw: dict[str, Any]) -> Friend:
+    shared = raw.get("sharedVideoInputs", raw.get("shares", []))
+    shared_ids = [
+        s.get("videoInputId", s) if isinstance(s, dict) else s for s in (shared or [])
+    ]
+    return Friend(
+        id=str(raw.get("id", "")),
+        email=raw.get("email") or raw.get("invitationEmail"),
+        nickname=raw.get("nickName"),
+        status=raw.get("status") or raw.get("invitationStatus"),
+        shared_cameras=[str(s) for s in shared_ids],
+    )
+
+
+@_blocking_tool
+def bosch_camera_motion_zones_get(camera: str) -> list[MotionZone]:
+    """List the motion-detection zone rectangles configured for one camera.
+
+    Coordinates are normalized 0.0-1.0 (x/y = top-left corner, w/h = size).
+    Returns an empty list if no zones are configured. Raises ``privacy_blocked``
+    if the camera is currently in privacy mode (Bosch returns HTTP 443 for
+    this endpoint while privacy is on).
+    """
+    br = _bridge()
+    _cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    try:
+        zones = br.get_motion_zones(session, cam_info["id"])
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
+    return _zone_dicts_to_models(zones)
+
+
+@_blocking_tool
+def bosch_camera_motion_zones_set(
+    camera: str, zones: list[dict[str, float]]
+) -> list[MotionZone]:
+    """Replace ALL motion-detection zones for one camera with the given list.
+
+    This is a full replace, not a merge — pass every zone you want to keep.
+    Each zone is ``{"x": ..., "y": ..., "w": ..., "h": ...}``, normalized
+    0.0-1.0. Pass an empty list to clear all zones (equivalent to calling
+    ``bosch_camera_motion_zones_clear``).
+    """
+    br = _bridge()
+    _cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    for i, z in enumerate(zones):
+        try:
+            MotionZone(**z)
+        except (KeyError, TypeError, ValidationError) as e:
+            raise MCPError(
+                code="invalid_argument",
+                detail=f"Zone {i} is invalid: {e}",
+                camera=name,
+            ) from e
+    try:
+        result = br.set_motion_zones(session, cam_info["id"], zones)
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
+    return _zone_dicts_to_models(result)
+
+
+@_blocking_tool
+def bosch_camera_motion_zones_clear(camera: str) -> list[MotionZone]:
+    """Remove all motion-detection zones for one camera. Returns the (empty) list."""
+    br = _bridge()
+    _cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    try:
+        result = br.set_motion_zones(session, cam_info["id"], [])
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
+    return _zone_dicts_to_models(result)
+
+
+@_blocking_tool
+def bosch_camera_privacy_masks_get(camera: str) -> list[PrivacyMask]:
+    """List the privacy-mask zone rectangles configured for one camera.
+
+    Coordinates are normalized 0.0-1.0 (x/y = top-left corner, w/h = size).
+    Masked areas are permanently blacked out in both live view and recordings.
+    """
+    br = _bridge()
+    _cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    try:
+        masks = br.get_privacy_masks(session, cam_info["id"])
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
+    return _mask_dicts_to_models(masks)
+
+
+@_blocking_tool
+def bosch_camera_privacy_masks_set(
+    camera: str, masks: list[dict[str, float]]
+) -> list[PrivacyMask]:
+    """Replace ALL privacy-mask zones for one camera with the given list.
+
+    Full replace, not a merge. Each mask is ``{"x": ..., "y": ..., "w": ...,
+    "h": ...}``, normalized 0.0-1.0. Pass an empty list to clear all masks.
+    """
+    br = _bridge()
+    _cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    for i, m in enumerate(masks):
+        try:
+            PrivacyMask(**m)
+        except (KeyError, TypeError, ValidationError) as e:
+            raise MCPError(
+                code="invalid_argument",
+                detail=f"Mask {i} is invalid: {e}",
+                camera=name,
+            ) from e
+    try:
+        result = br.set_privacy_masks(session, cam_info["id"], masks)
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
+    return _mask_dicts_to_models(result)
+
+
+@_blocking_tool
+def bosch_camera_privacy_masks_clear(camera: str) -> list[PrivacyMask]:
+    """Remove all privacy-mask zones for one camera. Returns the (empty) list."""
+    br = _bridge()
+    _cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    try:
+        result = br.set_privacy_masks(session, cam_info["id"], [])
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
+    return _mask_dicts_to_models(result)
+
+
+@_blocking_tool
+def bosch_camera_rules_list(camera: str) -> list[Rule]:
+    """List the automation (time-schedule) rules configured for one camera."""
+    br = _bridge()
+    _cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    _name, cam_info = br._resolve_cam(cameras, camera)
+    raw_rules = br.list_rules(session, cam_info["id"])
+    return [_rule_dict_to_model(r) for r in raw_rules]
+
+
+@_blocking_tool
+def bosch_camera_rules_add(
+    camera: str,
+    name: str,
+    start: str,
+    end: str,
+    days: list[int],
+) -> Rule:
+    """Create a new automation rule for one camera.
+
+    ``start``/``end`` are ``HH:MM`` 24h time. ``days`` are 0=Monday..6=Sunday.
+    The new rule is created active. Returns the created rule (with its id).
+    """
+    br = _bridge()
+    _cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    cam_name, cam_info = br._resolve_cam(cameras, camera)
+    if not all(0 <= d <= 6 for d in days):
+        raise MCPError(
+            code="invalid_argument",
+            detail=f"days must all be 0-6 (Monday-Sunday), got {days!r}",
+            camera=cam_name,
+        )
+    _validate_hhmm(start, "start", cam_name)
+    _validate_hhmm(end, "end", cam_name)
+    raw = br.add_rule(session, cam_info["id"], name=name, start=start, end=end, weekdays=days)
+    return _rule_dict_to_model(raw)
+
+
+@_blocking_tool
+def bosch_camera_rules_edit(
+    camera: str,
+    rule_id: str,
+    active: Optional[bool] = None,
+    name: Optional[str] = None,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    days: Optional[list[int]] = None,
+) -> Rule:
+    """Update an existing automation rule for one camera. Only provided fields change."""
+    br = _bridge()
+    _cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    cam_name, cam_info = br._resolve_cam(cameras, camera)
+    if active is None and name is None and start is None and end is None and days is None:
+        raise MCPError(
+            code="invalid_argument",
+            detail="At least one of active, name, start, end, or days must be provided.",
+            camera=cam_name,
+        )
+    if start is not None:
+        _validate_hhmm(start, "start", cam_name)
+    if end is not None:
+        _validate_hhmm(end, "end", cam_name)
+    try:
+        raw = br.edit_rule(
+            session,
+            cam_info["id"],
+            rule_id,
+            active=active,
+            name=name,
+            start=start,
+            end=end,
+            weekdays=days,
+        )
+    except ValueError as e:
+        raise MCPError(code="invalid_argument", detail=str(e), camera=cam_name) from e
+    return _rule_dict_to_model(raw)
+
+
+@_blocking_tool
+def bosch_camera_rules_delete(camera: str, rule_id: str) -> dict[str, Any]:
+    """Delete an automation rule from one camera. Returns {deleted, rule_id}."""
+    br = _bridge()
+    _cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    _cam_name, cam_info = br._resolve_cam(cameras, camera)
+    br.delete_rule(session, cam_info["id"], rule_id)
+    return {"deleted": True, "rule_id": rule_id}
+
+
+@_blocking_tool
+def bosch_camera_friends_list() -> list[Friend]:
+    """List all friends/invitations this account has shared cameras with.
+
+    No camera parameter — friends are account-level, not per-camera.
+    """
+    br = _bridge()
+    _cfg, session, _cameras = _get_session()
+    br.ensure_cli_importable()
+
+    raw_friends = br.list_friends(session)
+    return [_friend_dict_to_model(f) for f in raw_friends]
+
+
+@_blocking_tool
+def bosch_camera_friends_invite(email: str) -> Friend:
+    """Invite a new friend (by email) to share cameras with. Account-level."""
+    br = _bridge()
+    _cfg, session, _cameras = _get_session()
+    br.ensure_cli_importable()
+
+    raw = br.invite_friend(session, email)
+    return _friend_dict_to_model(raw)
+
+
+@_blocking_tool
+def bosch_camera_friends_share(
+    friend_id: str, camera: str, days: Optional[int] = None
+) -> dict[str, Any]:
+    """Share one camera with an existing friend.
+
+    ``days`` limits the share to a time window starting now; omit for an
+    unlimited share. Returns {shared, friend_id, camera}.
+    """
+    br = _bridge()
+    _cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    br.share_camera(session, friend_id, cam_info["id"], days=days)
+    return {"shared": True, "friend_id": friend_id, "camera": name}
+
+
+@_blocking_tool
+def bosch_camera_friends_unshare(friend_id: str) -> dict[str, Any]:
+    """Revoke ALL camera shares from a friend (the friend entry itself remains).
+
+    Returns {unshared, friend_id}.
+    """
+    br = _bridge()
+    _cfg, session, _cameras = _get_session()
+    br.ensure_cli_importable()
+
+    br.unshare_camera(session, friend_id)
+    return {"unshared": True, "friend_id": friend_id}
+
+
+@_blocking_tool
+def bosch_camera_friends_remove(friend_id: str) -> dict[str, Any]:
+    """Remove a friend entirely (revokes shares and deletes the invitation/friendship).
+
+    Returns {removed, friend_id}.
+    """
+    br = _bridge()
+    _cfg, session, _cameras = _get_session()
+    br.ensure_cli_importable()
+
+    br.remove_friend(session, friend_id)
+    return {"removed": True, "friend_id": friend_id}
+
+
+@_blocking_tool
+def bosch_camera_firmware_status(camera: str) -> FirmwareStatus:
+    """Get the current/latest firmware version and update-availability for one camera."""
+    br = _bridge()
+    _cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    fw = br.get_firmware_status(session, cam_info["id"])
+    return FirmwareStatus(
+        camera=name,
+        current=fw.get("current"),
+        up_to_date=fw.get("upToDate"),
+        update_available=fw.get("update"),
+        installing=bool(fw.get("updating", False)),
+    )
+
+
+@_blocking_tool
+def bosch_camera_firmware_install(camera: str) -> FirmwareStatus:
+    """Install the pending firmware update for one camera right now.
+
+    Mirrors the HA integration's ``async_install_firmware`` guard: raises
+    ``invalid_argument`` if an install is already in progress, or if there is
+    no pending update to install (already up to date). The camera reboots for
+    roughly 3-7 minutes after the install starts; this call returns as soon
+    as Bosch accepts the request, it does not wait for the reboot to finish.
+    """
+    br = _bridge()
+    _cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    try:
+        fw = br.install_firmware(session, cam_info["id"])
+    except ValueError as e:
+        raise MCPError(code="invalid_argument", detail=str(e), camera=name) from e
+    return FirmwareStatus(
+        camera=name,
+        current=fw.get("current"),
+        up_to_date=fw.get("upToDate"),
+        update_available=fw.get("update"),
+        installing=bool(fw.get("updating", False)),
+    )
 
 
 # ── Register resources + prompts ──────────────────────────────────────────────
@@ -1928,7 +2728,7 @@ def bosch_camera_token_status() -> TokenStatus:
 # Must be imported AFTER `mcp` is defined and AFTER all tool definitions so that
 # resources.py can import bosch_camera_snapshot from this module without a
 # circular import.
-from . import resources, prompts  # noqa: E402,F401  — side-effect imports
+from . import resources, prompts  # noqa: E402,F401  — side-effect imports  # pylint: disable=unused-import,wrong-import-position
 
 # ── CLI entrypoint ────────────────────────────────────────────────────────────
 
@@ -1975,7 +2775,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     """CLI entrypoint declared in pyproject.toml [project.scripts]."""
-    global _CONFIG_PATH
+    # module-level config-path override, set once at CLI startup
+    global _CONFIG_PATH  # pylint: disable=global-statement
     args = _parse_args(argv)
     logging.basicConfig(
         level=logging.DEBUG if args.debug else logging.WARNING,

@@ -90,7 +90,8 @@ def bosch_cloud_ssl_context() -> ssl.SSLContext:
 
     The context is built once and cached for the lifetime of the process.
     """
-    global _SSL_CONTEXT
+    # process-lifetime SSL-context cache, set once
+    global _SSL_CONTEXT  # pylint: disable=global-statement
     if _SSL_CONTEXT is None:
         ctx = ssl.create_default_context()
         ctx.load_verify_locations(cadata=BOSCH_CLOUD_CA_PEM)
@@ -98,6 +99,8 @@ def bosch_cloud_ssl_context() -> ssl.SSLContext:
         # allow OpenSSL to anchor the chain at it.  This does not weaken
         # validation of public hosts: their chains still terminate at a trusted
         # system root.
+        # present at runtime (Python 3.10+), pylint's ssl stub lags
+        # pylint: disable-next=no-member
         ctx.verify_flags |= ssl.VERIFY_X509_PARTIAL_CHAIN
         _SSL_CONTEXT = ctx
     return _SSL_CONTEXT

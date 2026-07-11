@@ -1,0 +1,5 @@
+[codespell]
+skip = .git,dist,*.egg-info,backups,uv.lock,package-lock.json,htmlcov
+# upToDate: the literal Bosch cloud API JSON field name (GET/PUT .../firmware),
+# not a typo — must stay camelCase to match the wire format exactly.
+ignore-words-list = uptodate

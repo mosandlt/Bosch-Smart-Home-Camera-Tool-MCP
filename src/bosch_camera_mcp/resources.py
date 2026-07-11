@@ -15,10 +15,8 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any
-
 from types import ModuleType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .errors import MCPError
 from .server import mcp
@@ -55,10 +53,10 @@ def _get_session(
 def cameras_list() -> str:
     """Return JSON list of all cameras (extended CameraSummary + description/firmware/mac)."""
     try:
-        cfg, session, cameras = _get_session()
+        _cfg, session, cameras = _get_session()
     except MCPError as exc:
         if exc.code in ("reauth_required", "auth_expired"):
-            raise MCPError(code="auth_expired", detail=exc.detail)
+            raise MCPError(code="auth_expired", detail=exc.detail) from exc
         raise
 
     import bosch_camera as bc
@@ -94,10 +92,10 @@ def cameras_list() -> str:
 def camera_snapshot(name: str) -> bytes:
     """Return the latest cached JPEG for `name`, capturing fresh if none exists."""
     try:
-        cfg, session, cameras = _get_session()
+        _cfg, _session, cameras = _get_session()
     except MCPError as exc:
         if exc.code in ("reauth_required", "auth_expired"):
-            raise MCPError(code="auth_expired", detail=exc.detail)
+            raise MCPError(code="auth_expired", detail=exc.detail) from exc
         raise
 
     br = _bridge()
@@ -132,15 +130,15 @@ def camera_snapshot(name: str) -> bytes:
 def camera_events(name: str) -> str:
     """Return the last 50 events for camera `name` as a JSON string."""
     try:
-        cfg, session, cameras = _get_session()
+        _cfg, session, cameras = _get_session()
     except MCPError as exc:
         if exc.code in ("reauth_required", "auth_expired"):
-            raise MCPError(code="auth_expired", detail=exc.detail)
+            raise MCPError(code="auth_expired", detail=exc.detail) from exc
         raise
 
     br = _bridge()
     br.ensure_cli_importable()
-    canonical_name, cam_info = br._resolve_cam(cameras, name)
+    _canonical_name, cam_info = br._resolve_cam(cameras, name)
     cam_id = cam_info["id"]
 
     import bosch_camera as bc

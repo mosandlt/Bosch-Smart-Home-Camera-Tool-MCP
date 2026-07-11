@@ -28,9 +28,9 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from html import unescape
 from typing import Any, Iterable
-import defusedxml.ElementTree as ET  # noqa: N813 — replaces xml.etree.ElementTree (XXE-safe)
 from zoneinfo import ZoneInfo
 
+import defusedxml.ElementTree as ET  # noqa: N813 — replaces xml.etree.ElementTree (XXE-safe)
 import httpx
 
 _LOGGER = logging.getLogger(__name__)
@@ -92,7 +92,7 @@ class MaintenanceWindow:
         - scheduled: now is before start AND start is within MAX_AGE in the future
         - past: end is before now (item kept for context)
         - recent: no parseable window but pub_date is within MAX_AGE
-        - unknown: no window AND pub_date is old / unparseable
+        - unknown: no window AND pub_date is old / unparsable
         """
         moment = now or datetime.now(tz=timezone.utc)
         if self.scheduled_start is not None and self.scheduled_end is not None:
@@ -106,6 +106,7 @@ class MaintenanceWindow:
         return "unknown"
 
     def as_dict(self) -> dict[str, Any]:
+        """Serialize to a JSON-safe dict (ISO-8601 timestamps, no dataclass types)."""
         return {
             "title": self.title,
             "link": self.link,

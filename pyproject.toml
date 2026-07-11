@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bosch-smart-home-camera-mcp"
-version = "1.6.0"
+version = "1.7.0"
 description = "Model Context Protocol server for Bosch Smart Home cameras"
 readme = "README.md"
 license = { text = "MIT" }
@@ -39,6 +39,7 @@ test = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "pytest-mock>=3.12",
+    "pytest-cov>=5.0",
     "responses>=0.25",
     "freezegun>=1.4",
     "aiohttp>=3.9",  # regression tests only (pin the v1.5.1 aiohttp.DigestAuth root cause)
@@ -73,3 +74,64 @@ strict = true
 # so they are unresolvable both locally and in CI. defusedxml ships no stubs.
 module = ["bosch_camera", "get_token", "defusedxml", "defusedxml.*"]
 ignore_missing_imports = true
+
+[tool.pylint.format]
+# ruff (the primary style linter, gating in CI) does not enable E501 for this
+# repo — several Pydantic Field(description=...) docstrings intentionally run
+# a bit past 100 cols for readability of the MCP tool schema text an LLM
+# caller sees. 120 keeps pylint from re-litigating a call ruff already made.
+max-line-length = 120
+
+[tool.pylint.main]
+# Same root cause as the mypy override above: bosch_camera/get_token are reached
+# via sys.path injection at runtime (Option C bridge to the sister CLI repo),
+# never pip-installed, so pylint cannot resolve them either — this is
+# architecture, not a bug.
+ignored-modules = ["bosch_camera", "get_token"]
+
+[tool.pylint."messages control"]
+disable = [
+    # Deliberate lazy/deferred imports: (a) breaks a genuine import cycle between
+    # server.py <-> resources.py <-> prompts.py (all three need FastMCP registration
+    # order), (b) defers the sys.path-injected bosch_camera/get_token imports until
+    # a tool actually runs, so importing bosch_camera_mcp.server alone never touches
+    # the sister-CLI repo on disk. Not a style slip — see cli_bridge.ensure_cli_importable.
+    "import-outside-toplevel",
+    # adapters/cli_bridge.py + resources.py are an intentional bridge into the
+    # sister CLI's internals (bosch_camera.py) — reaching its _resolve_cam /
+    # _merge_defaults / _is_token_near_expiry helpers is the documented Option C
+    # integration surface, not accidental protected-member access.
+    "protected-access",
+    # Same root cause as import-outside-toplevel above: server.py, resources.py,
+    # and prompts.py import each other under TYPE_CHECKING/deferred guards by
+    # design so FastMCP resource/prompt registration happens after tool
+    # definitions. pylint's cyclic-import check doesn't understand the guard.
+    "cyclic-import",
+    # Tool/resource bodies sit at an external-API boundary (Bosch cloud, LAN RCP,
+    # sister-CLI bridge) and must convert ANY failure into a structured MCPError
+    # instead of letting a raw exception cross the MCP transport — broad catches
+    # here are the error-boundary pattern, not swallowed bugs.
+    "broad-exception-caught",
+    # Complexity metrics (too-many-locals/branches/statements/arguments/returns/
+    # instance-attributes) flagged on pre-existing, already-tested functions in
+    # this release (get_session_and_cameras, the RCP command builder, the
+    # maintenance-window dataclass) — refactoring untouched legacy code purely to
+    # satisfy a metric is out of scope for this change and carries regression
+    # risk with no behavior benefit. Revisit if these functions are touched again.
+    "too-many-locals",
+    "too-many-branches",
+    "too-many-statements",
+    "too-many-arguments",
+    "too-many-positional-arguments",
+    "too-many-return-statements",
+    "too-many-instance-attributes",
+    # One ~13-line dict-building block shared between resources.py and server.py
+    # (event normalization) — factoring it out would add an import-cycle-prone
+    # indirection for a single small snippet; not worth it.
+    "duplicate-code",
+    # server.py is the single FastMCP entrypoint registering every tool, its
+    # Pydantic response model, and CLI plumbing — natural size for this
+    # architecture (34+ tools), not a smell. Splitting it is a larger
+    # refactor tracked separately, not part of this change.
+    "too-many-lines",
+]

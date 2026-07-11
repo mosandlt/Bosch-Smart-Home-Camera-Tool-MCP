@@ -57,7 +57,7 @@ def ensure_cli_importable() -> None:
     cli = str(get_cli_path())
     if cli not in sys.path:
         sys.path.insert(0, cli)
-    import bosch_camera  # noqa: F401 — fails fast if path wrong
+    import bosch_camera  # noqa: F401 — fails fast if path wrong  # pylint: disable=unused-import,import-error
 
 
 # ── Session + camera bootstrap ────────────────────────────────────────────────
@@ -93,7 +93,7 @@ def get_session_and_cameras(
     if config_path:
         import json
 
-        with open(config_path) as fh:
+        with open(config_path, encoding="utf-8") as fh:
             cfg: dict[str, Any] = json.load(fh)
         # Merge defaults so forward-compat keys are present
         bc._merge_defaults(cfg, bc.DEFAULT_CONFIG)
@@ -200,7 +200,7 @@ def get_session_and_cameras(
             raise MCPError(
                 code="api_unreachable",
                 detail=f"Failed to discover cameras: {exc}",
-            )
+            ) from exc
 
     return cfg, session, cameras
 
@@ -339,7 +339,7 @@ def set_pan(session: requests.Session, cam_id: str, direction: str) -> dict[str,
     else:
         try:
             target = int(direction)
-        except ValueError:
+        except ValueError as exc:
             raise MCPError(
                 code="permission_denied",
                 detail=(
@@ -347,8 +347,8 @@ def set_pan(session: requests.Session, cam_id: str, direction: str) -> dict[str,
                     "Use home|left|right|back-left|back-right or an integer in [-120, 120]."
                 ),
                 camera=cam_id,
-            )
-        if not (-limit <= target <= limit):
+            ) from exc
+        if not -limit <= target <= limit:
             raise MCPError(
                 code="permission_denied",
                 detail=f"Pan position {target} out of range (-{limit} to +{limit}).",
@@ -738,6 +738,220 @@ def set_autofollow(
     return False  # unreachable
 
 
+def get_lighting_schedule(session: requests.Session, cam_id: str) -> dict[str, Any]:
+    """GET /v11/video_inputs/{cam_id}/lighting_options.
+
+    Returns {scheduleStatus, generalLightOnTime, generalLightOffTime,
+    darknessThreshold, lightOnMotion, lightOnMotionFollowUpTimeSeconds,
+    frontIlluminatorInGeneralLightOn, frontIlluminatorGeneralLightIntensity,
+    wallwasherInGeneralLightOn}.
+
+    Only available on outdoor (Eyes) cameras with LED light. HTTP 442 = not
+    supported on this camera model. HTTP 444 = camera offline.
+    API reference: cmd_lighting_schedule in bosch_camera.py.
+    """
+    from bosch_camera_mcp.errors import MCPError
+
+    r = session.get(f"{CLOUD_API}/v11/video_inputs/{cam_id}/lighting_options", timeout=10)
+    if r.status_code == 200:
+        return dict(r.json())
+    if r.status_code == 442:
+        raise MCPError(
+            code="hardware_unsupported",
+            detail=f"Lighting schedule not supported on camera model (HTTP 442, cam {cam_id}).",
+        )
+    if r.status_code == 444:
+        raise MCPError(
+            code="api_unreachable",
+            detail=f"Camera is offline (HTTP 444, cam {cam_id}). Lighting schedule unavailable.",
+        )
+    _raise_api_error(r, f"get_lighting_schedule({cam_id})")
+    return {}  # unreachable
+
+
+def set_lighting_schedule(
+    session: requests.Session,
+    cam_id: str,
+    on_time: Optional[str] = None,
+    off_time: Optional[str] = None,
+    light_on_motion: Optional[bool] = None,
+    darkness_threshold: Optional[float] = None,
+) -> dict[str, Any]:
+    """PUT /v11/video_inputs/{cam_id}/lighting_options — partial update.
+
+    Fetches current schedule first, merges requested fields, forces
+    scheduleStatus="FOLLOW_SCHEDULE" (matches CLI behavior — writing a
+    schedule implies following it), then sends the full body.
+
+    on_time/off_time: "HH:MM" or "HH:MM:SS" (":00" appended if seconds missing).
+    darkness_threshold: 0.0-1.0.
+    HTTP 442 = not supported on this camera model. HTTP 444 = camera offline.
+    API reference: cmd_lighting_schedule in bosch_camera.py.
+    """
+    current = get_lighting_schedule(session, cam_id)
+    if on_time is not None:
+        current["generalLightOnTime"] = on_time if len(on_time.split(":")) == 3 else f"{on_time}:00"
+    if off_time is not None:
+        current["generalLightOffTime"] = (
+            off_time if len(off_time.split(":")) == 3 else f"{off_time}:00"
+        )
+    if light_on_motion is not None:
+        current["lightOnMotion"] = light_on_motion
+    if darkness_threshold is not None:
+        current["darknessThreshold"] = float(darkness_threshold)
+    current["scheduleStatus"] = "FOLLOW_SCHEDULE"
+
+    from bosch_camera_mcp.errors import MCPError
+
+    r = session.put(
+        f"{CLOUD_API}/v11/video_inputs/{cam_id}/lighting_options",
+        json=current,
+        headers={"Content-Type": "application/json"},
+        timeout=10,
+    )
+    if r.status_code in (200, 204):
+        return get_lighting_schedule(session, cam_id)
+    if r.status_code == 442:
+        raise MCPError(
+            code="hardware_unsupported",
+            detail=f"Lighting schedule not supported on camera model (HTTP 442, cam {cam_id}).",
+        )
+    if r.status_code == 444:
+        raise MCPError(
+            code="api_unreachable",
+            detail=f"Camera is offline (HTTP 444, cam {cam_id}). Lighting schedule unavailable.",
+        )
+    _raise_api_error(r, f"set_lighting_schedule({cam_id})")
+    return {}  # unreachable
+
+
+def get_alarm_settings(session: requests.Session, cam_id: str) -> dict[str, Any]:
+    """GET /v11/video_inputs/{cam_id}/alarm_settings.
+
+    Returns {alarmDelayInSeconds, ...}. Gen2 Indoor II (HOME_Eyes_Indoor) only.
+    API reference: cmd_siren --set-duration in bosch_camera.py.
+    """
+    r = session.get(f"{CLOUD_API}/v11/video_inputs/{cam_id}/alarm_settings", timeout=10)
+    if r.status_code == 200:
+        return dict(r.json())
+    _raise_api_error(r, f"get_alarm_settings({cam_id})")
+    return {}  # unreachable
+
+
+def set_siren_duration(session: requests.Session, cam_id: str, duration_secs: int) -> dict[str, Any]:
+    """PUT /v11/video_inputs/{cam_id}/alarm_settings — set siren duration.
+
+    Fetches current alarm_settings first (best-effort — a fetch failure still
+    proceeds with just the new field, mirroring CLI behavior), merges
+    alarmDelayInSeconds, then PUTs the full body. Range 10-300 seconds
+    (validated by the caller before this is invoked).
+    Gen2 Indoor II (HOME_Eyes_Indoor) only. HTTP 443 = camera in privacy mode.
+    API reference: cmd_siren --set-duration in bosch_camera.py.
+    """
+    try:
+        current = get_alarm_settings(session, cam_id)
+    except Exception:
+        current = {}
+    current["alarmDelayInSeconds"] = duration_secs
+    r = session.put(
+        f"{CLOUD_API}/v11/video_inputs/{cam_id}/alarm_settings",
+        json=current,
+        headers={"Content-Type": "application/json"},
+        timeout=10,
+    )
+    if r.status_code in (200, 201, 204):
+        return {"alarmDelayInSeconds": duration_secs}
+    _raise_api_error(r, f"set_siren_duration({cam_id})")
+    return {}  # unreachable
+
+
+LIVE_TYPE_CANDIDATES = ["REMOTE", "LOCAL"]
+
+
+def open_intercom_session(
+    session: requests.Session,
+    cam_id: str,
+    duration: int = 60,
+    speaker_level: Optional[int] = None,
+) -> dict[str, Any]:
+    """Open a listen-audio session tunnel to a camera (cloud proxy).
+
+    Mirrors cmd_intercom in bosch_camera.py:
+      1. (optional) full-body PUT /v11/video_inputs/{id}/audio to set speakerLevel,
+         preserving audioEnabled + microphoneLevel from the current state.
+      2. PUT /v11/video_inputs/{id}/connection with type in LIVE_TYPE_CANDIDATES
+         (REMOTE then LOCAL) to obtain a proxy URL.
+      3. Build an rtsps:// URL with enableaudio=1 for the audio-only stream.
+
+    NOTE: this is a **listen-only** audio tunnel (camera → caller). True
+    two-way talk (microphone → camera speaker) requires a direct media tunnel
+    that is not yet exposed via the cloud API (same limitation as the CLI's
+    own `intercom` command, verified 2026-05-xx).
+
+    Returns {rtsps_url, duration, speaker_level_set}. Raises MCPError
+    (api_unreachable) if no connection type succeeds.
+    """
+    from bosch_camera_mcp.errors import MCPError
+
+    speaker_level_set: Optional[int] = None
+    if speaker_level is not None:
+        try:
+            cur_audio = get_audio(session, cam_id)
+            cur_enabled = cur_audio.get("audioEnabled", cur_audio.get("enabled", True))
+            cur_mic = cur_audio.get("microphoneLevel", cur_audio.get("MicrophoneLevel", 50))
+            r = session.put(
+                f"{CLOUD_API}/v11/video_inputs/{cam_id}/audio",
+                json={
+                    "audioEnabled": cur_enabled,
+                    "microphoneLevel": cur_mic,
+                    "speakerLevel": speaker_level,
+                },
+                headers={"Content-Type": "application/json"},
+                timeout=10,
+            )
+            if r.status_code in (200, 201, 204):
+                speaker_level_set = speaker_level
+        except Exception:
+            # Best-effort — a failed speaker-level write shouldn't block the
+            # audio session itself (matches CLI's own warn-and-continue).
+            speaker_level_set = None
+
+    conn_data: Optional[dict[str, Any]] = None
+    for conn_type in LIVE_TYPE_CANDIDATES:
+        try:
+            r = session.put(
+                f"{CLOUD_API}/v11/video_inputs/{cam_id}/connection",
+                json={"type": conn_type, "highQualityVideo": False},
+                headers={"Content-Type": "application/json"},
+                timeout=10,
+            )
+            if r.status_code in (200, 201):
+                conn_data = r.json()
+                break
+        except Exception:
+            continue
+
+    if not conn_data or not conn_data.get("urls"):
+        raise MCPError(
+            code="api_unreachable",
+            detail=f"Could not open live connection for intercom (cam {cam_id}).",
+        )
+
+    proxy_url = conn_data["urls"][0]
+    proxy_host = proxy_url.split("/")[0].replace(":42090", "")
+    proxy_hash = proxy_url.split("/", 1)[1] if "/" in proxy_url else ""
+    rtsps_url = (
+        f"rtsps://{proxy_host}:443/{proxy_hash}"
+        f"/rtsp_tunnel?inst=2&enableaudio=1&fmtp=1&maxSessionDuration={duration}"
+    )
+
+    return {
+        "rtsps_url": rtsps_url,
+        "duration": duration,
+        "speaker_level_set": speaker_level_set,
+    }
+
+
 def get_privacy_sound(session: requests.Session, cam_id: str) -> dict[str, Any]:
     """GET /v11/video_inputs/{cam_id}/privacy_sound_override.
 
@@ -773,6 +987,339 @@ def set_privacy_sound(
     return False  # unreachable
 
 
+def get_motion_zones(session: requests.Session, cam_id: str) -> list[dict[str, Any]]:
+    """GET /v11/video_inputs/{cam_id}/motion_sensitive_areas.
+
+    Returns a list of {x, y, w, h} normalized (0.0-1.0) zone rectangles.
+    Extracted from cmd_zones in bosch_camera.py.
+    """
+    r = session.get(
+        f"{CLOUD_API}/v11/video_inputs/{cam_id}/motion_sensitive_areas", timeout=10
+    )
+    if r.status_code == 200:
+        result = r.json()
+        return list(result) if isinstance(result, list) else []
+    _raise_api_error(r, f"get_motion_zones({cam_id})")
+    return []  # unreachable
+
+
+def set_motion_zones(
+    session: requests.Session, cam_id: str, zones: list[dict[str, float]]
+) -> list[dict[str, Any]]:
+    """POST /v11/video_inputs/{cam_id}/motion_sensitive_areas — replace all zones.
+
+    Body: the full list of {x, y, w, h} rectangles (full replace, not a merge —
+    same semantics as the CLI's ``zones set``). Pass an empty list to clear all
+    zones (same as the CLI's ``zones clear``). Returns the zones just set.
+    Extracted from cmd_zones in bosch_camera.py.
+    """
+    r = session.post(
+        f"{CLOUD_API}/v11/video_inputs/{cam_id}/motion_sensitive_areas",
+        json=zones,
+        headers={"Content-Type": "application/json"},
+        timeout=10,
+    )
+    if r.status_code in (200, 204):
+        return list(zones)
+    _raise_api_error(r, f"set_motion_zones({cam_id})")
+    return []  # unreachable
+
+
+def get_privacy_masks(session: requests.Session, cam_id: str) -> list[dict[str, Any]]:
+    """GET /v11/video_inputs/{cam_id}/privacy_masks.
+
+    Returns a list of {x, y, w, h} normalized (0.0-1.0) mask rectangles.
+    Extracted from cmd_privacy_masks in bosch_camera.py.
+    """
+    r = session.get(f"{CLOUD_API}/v11/video_inputs/{cam_id}/privacy_masks", timeout=10)
+    if r.status_code == 200:
+        result = r.json()
+        return list(result) if isinstance(result, list) else []
+    _raise_api_error(r, f"get_privacy_masks({cam_id})")
+    return []  # unreachable
+
+
+def set_privacy_masks(
+    session: requests.Session, cam_id: str, masks: list[dict[str, float]]
+) -> list[dict[str, Any]]:
+    """POST /v11/video_inputs/{cam_id}/privacy_masks — replace all masks.
+
+    Body: the full list of {x, y, w, h} rectangles (full replace). Pass an
+    empty list to clear all masks. Returns the masks just set.
+    Extracted from cmd_privacy_masks in bosch_camera.py.
+    """
+    r = session.post(
+        f"{CLOUD_API}/v11/video_inputs/{cam_id}/privacy_masks",
+        json=masks,
+        headers={"Content-Type": "application/json"},
+        timeout=10,
+    )
+    if r.status_code in (200, 204):
+        return list(masks)
+    _raise_api_error(r, f"set_privacy_masks({cam_id})")
+    return []  # unreachable
+
+
+def list_rules(session: requests.Session, cam_id: str) -> list[dict[str, Any]]:
+    """GET /v11/video_inputs/{cam_id}/rules — list automation (schedule) rules.
+
+    Extracted from cmd_rules in bosch_camera.py.
+    """
+    r = session.get(f"{CLOUD_API}/v11/video_inputs/{cam_id}/rules", timeout=10)
+    if r.status_code == 200:
+        result = r.json()
+        return list(result) if isinstance(result, list) else []
+    _raise_api_error(r, f"list_rules({cam_id})")
+    return []  # unreachable
+
+
+def add_rule(
+    session: requests.Session,
+    cam_id: str,
+    name: str,
+    start: str,
+    end: str,
+    weekdays: list[int],
+) -> dict[str, Any]:
+    """POST /v11/video_inputs/{cam_id}/rules — create a new schedule rule.
+
+    ``start``/``end`` are ``HH:MM`` (seconds appended automatically).
+    ``weekdays`` are 0=Mon..6=Sun. Returns the created rule (includes its id).
+    Extracted from cmd_rules(add) in bosch_camera.py.
+    """
+    body = {
+        "id": None,
+        "name": name,
+        "isActive": True,
+        "startTime": f"{start}:00",
+        "endTime": f"{end}:00",
+        "weekdays": weekdays,
+    }
+    r = session.post(
+        f"{CLOUD_API}/v11/video_inputs/{cam_id}/rules",
+        json=body,
+        headers={"Content-Type": "application/json"},
+        timeout=10,
+    )
+    if r.status_code in (200, 201):
+        return dict(r.json())
+    _raise_api_error(r, f"add_rule({cam_id})")
+    return {}  # unreachable
+
+
+def edit_rule(
+    session: requests.Session,
+    cam_id: str,
+    rule_id: str,
+    active: Optional[bool] = None,
+    name: Optional[str] = None,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    weekdays: Optional[list[int]] = None,
+) -> dict[str, Any]:
+    """PUT /v11/video_inputs/{cam_id}/rules/{rule_id} — partial update.
+
+    Fetches the current rule first (the endpoint requires the full rule body,
+    not a partial patch — same read-modify-write requirement as the other
+    config PUTs in this module), merges requested fields, then PUTs it back.
+    Raises MCPError(code="unknown_camera"... no — raises a plain ValueError if
+    ``rule_id`` is not found among this camera's rules (caller wraps as needed).
+    Extracted from cmd_rules(edit) in bosch_camera.py.
+    """
+    rules = list_rules(session, cam_id)
+    target = next((rl for rl in rules if rl.get("id") == rule_id), None)
+    if target is None:
+        raise ValueError(f"Rule id {rule_id!r} not found for camera {cam_id!r}")
+
+    if active is not None:
+        target["isActive"] = active
+    if name is not None:
+        target["name"] = name
+    if start is not None:
+        target["startTime"] = start if len(start.split(":")) == 3 else f"{start}:00"
+    if end is not None:
+        target["endTime"] = end if len(end.split(":")) == 3 else f"{end}:00"
+    if weekdays is not None:
+        target["weekdays"] = weekdays
+
+    r = session.put(
+        f"{CLOUD_API}/v11/video_inputs/{cam_id}/rules/{rule_id}",
+        json=target,
+        headers={"Content-Type": "application/json"},
+        timeout=10,
+    )
+    if r.status_code in (200, 201, 204):
+        return dict(target)
+    _raise_api_error(r, f"edit_rule({cam_id}, {rule_id})")
+    return {}  # unreachable
+
+
+def delete_rule(session: requests.Session, cam_id: str, rule_id: str) -> bool:
+    """DELETE /v11/video_inputs/{cam_id}/rules/{rule_id}.
+
+    Extracted from cmd_rules(delete) in bosch_camera.py.
+    """
+    r = session.delete(f"{CLOUD_API}/v11/video_inputs/{cam_id}/rules/{rule_id}", timeout=10)
+    if r.status_code in (200, 204):
+        return True
+    _raise_api_error(r, f"delete_rule({cam_id}, {rule_id})")
+    return False  # unreachable
+
+
+def list_friends(session: requests.Session) -> list[dict[str, Any]]:
+    """GET /v11/friends — list camera-sharing friends/invitations.
+
+    Extracted from cmd_friends in bosch_camera.py.
+    """
+    r = session.get(f"{CLOUD_API}/v11/friends", timeout=10)
+    if r.status_code == 200:
+        result = r.json()
+        return list(result) if isinstance(result, list) else []
+    _raise_api_error(r, "list_friends()")
+    return []  # unreachable
+
+
+def invite_friend(session: requests.Session, email: str) -> dict[str, Any]:
+    """POST /v11/friends — invite a new friend to share cameras with.
+
+    Extracted from cmd_friends(invite) in bosch_camera.py.
+    """
+    r = session.post(
+        f"{CLOUD_API}/v11/friends",
+        json={"invitationEmail": email, "nickName": email},
+        headers={"Content-Type": "application/json"},
+        timeout=10,
+    )
+    if r.status_code in (200, 201):
+        return dict(r.json())
+    _raise_api_error(r, "invite_friend()")
+    return {}  # unreachable
+
+
+def share_camera(
+    session: requests.Session,
+    friend_id: str,
+    cam_id: str,
+    days: Optional[int] = None,
+) -> bool:
+    """PUT /v11/friends/{friend_id}/share — share one camera with a friend.
+
+    PUT /share is full-replace on the Bosch side (confirmed against the CLI's
+    cmd_friends(share), which has the same semantics). Because the MCP tool's
+    signature is one-camera-per-call (unlike the CLI, which can share several
+    cameras in one command), sending a single-entry list here would silently
+    DROP any camera the friend already had shared — bug-hunt finding
+    2026-07-11. Fixed by first fetching this friend's current shares via
+    list_friends() and merging: any existing entry for a DIFFERENT camera is
+    kept as-is, an existing entry for the SAME camera is replaced (so calling
+    this again with a new ``days`` value updates that camera's window), and
+    the new camera is appended if not already present. ``days`` adds a
+    time-limited share window for the target camera; omit for an unlimited
+    share. Extracted from cmd_friends(share).
+    """
+    import datetime as _dt
+
+    entry: dict[str, Any] = {"videoInputId": cam_id}
+    if days is not None:
+        now = _dt.datetime.now(_dt.timezone.utc)
+        end = now + _dt.timedelta(days=days)
+        entry["shareTime"] = {
+            "start": now.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+            "end": end.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+        }
+
+    existing_shares: list[dict[str, Any]] = []
+    for friend in list_friends(session):
+        if str(friend.get("id", "")) == str(friend_id):
+            raw_shares = friend.get("sharedVideoInputs", friend.get("shares", []))
+            existing_shares = [s for s in (raw_shares or []) if isinstance(s, dict)]
+            break
+    merged = [s for s in existing_shares if s.get("videoInputId") != cam_id]
+    merged.append(entry)
+
+    r = session.put(
+        f"{CLOUD_API}/v11/friends/{friend_id}/share",
+        json=merged,
+        headers={"Content-Type": "application/json"},
+        timeout=10,
+    )
+    if r.status_code in (200, 201, 204):
+        return True
+    _raise_api_error(r, f"share_camera({friend_id}, {cam_id})")
+    return False  # unreachable
+
+
+def unshare_camera(session: requests.Session, friend_id: str) -> bool:
+    """PUT /v11/friends/{friend_id}/share with an empty list — revoke all shares.
+
+    Extracted from cmd_friends(unshare) in bosch_camera.py.
+    """
+    r = session.put(
+        f"{CLOUD_API}/v11/friends/{friend_id}/share",
+        json=[],
+        headers={"Content-Type": "application/json"},
+        timeout=10,
+    )
+    if r.status_code in (200, 201, 204):
+        return True
+    _raise_api_error(r, f"unshare_camera({friend_id})")
+    return False  # unreachable
+
+
+def remove_friend(session: requests.Session, friend_id: str) -> bool:
+    """DELETE /v11/friends/{friend_id} — remove a friend entirely.
+
+    Extracted from cmd_friends(remove) in bosch_camera.py.
+    """
+    r = session.delete(f"{CLOUD_API}/v11/friends/{friend_id}", timeout=10)
+    if r.status_code in (200, 204):
+        return True
+    _raise_api_error(r, f"remove_friend({friend_id})")
+    return False  # unreachable
+
+
+def get_firmware_status(session: requests.Session, cam_id: str) -> dict[str, Any]:
+    """GET /v11/video_inputs/{cam_id}/firmware.
+
+    Returns raw JSON dict {current, upToDate, updating, update (target
+    version or None)}. Extracted from cmd_firmware_update in bosch_camera.py.
+    """
+    r = session.get(f"{CLOUD_API}/v11/video_inputs/{cam_id}/firmware", timeout=10)
+    if r.status_code == 200:
+        return dict(r.json())
+    _raise_api_error(r, f"get_firmware_status({cam_id})")
+    return {}  # unreachable
+
+
+def install_firmware(session: requests.Session, cam_id: str) -> dict[str, Any]:
+    """PUT /v11/video_inputs/{cam_id}/firmware — install the pending update.
+
+    Same endpoint the official Bosch app's "Update now" button and the HA
+    integration's ``async_install_firmware`` use. Guards mirror both of
+    those: raises ValueError if an install is already ``updating``, or if
+    there is no pending ``update`` target (caller maps ValueError to
+    MCPError). Installing reboots the camera for 3-7 minutes.
+    Extracted from cmd_firmware_update(install) in bosch_camera.py.
+    """
+    fw = get_firmware_status(session, cam_id)
+    if fw.get("updating"):
+        raise ValueError(f"Firmware install already in progress for camera {cam_id!r}")
+    target = fw.get("update")
+    if not target:
+        raise ValueError(f"No firmware update available to install for camera {cam_id!r}")
+    r = session.put(
+        f"{CLOUD_API}/v11/video_inputs/{cam_id}/firmware",
+        json={"id": target},
+        headers={"Content-Type": "application/json"},
+        timeout=10,
+    )
+    if r.status_code in (200, 201, 204):
+        fw["updating"] = True
+        return fw
+    _raise_api_error(r, f"install_firmware({cam_id})")
+    return {}  # unreachable
+
+
 def _raise_api_error(resp: requests.Response, context: str) -> None:
     """Translate a non-success HTTP response to an MCPError."""
     from bosch_camera_mcp.errors import MCPError
@@ -780,7 +1327,10 @@ def _raise_api_error(resp: requests.Response, context: str) -> None:
     if resp.status_code == 401:
         raise MCPError(
             code="reauth_required",
-            detail=f"API returned 401 during {context}. Run `python3 bosch_camera.py token browser`.",
+            detail=(
+                f"API returned 401 during {context}. "
+                "Run `python3 bosch_camera.py token browser`."
+            ),
         )
     if resp.status_code == 403:
         raise MCPError(
