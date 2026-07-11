@@ -1,5 +1,32 @@
 # Changelog — Bosch Smart Home Camera MCP Server
 
+## [v1.7.0] - 2026-07-11
+
+### Added
+
+Family-parity closeout (`docs/family-parity-plan.md` §2b) — 21 new tools closing the gap between the MCP server and the HA integration / Python CLI. 55 tools total.
+
+- **Motion zones**: `bosch_camera_motion_zones_get` / `_set` / `_clear` — `GET/POST /v11/video_inputs/{id}/motion_sensitive_areas`, full-replace semantics. `_set` validates each zone via a Pydantic model (`0.0 ≤ x,y ≤ 1.0`, `0.0 < w,h ≤ 1.0`) before sending.
+- **Privacy masks**: `bosch_camera_privacy_masks_get` / `_set` / `_clear` — `GET/POST /v11/video_inputs/{id}/privacy_masks`, same shape/validation as motion zones.
+- **Automation rules**: `bosch_camera_rules_list` / `_add` / `_edit` / `_delete` — `GET/POST/PUT/DELETE /v11/video_inputs/{id}/rules`. `_edit` is read-modify-write (Bosch's PUT requires the full rule body). `start`/`end` are validated as 24h `HH:MM[:SS]` before being sent.
+- **Camera sharing / friends**: `bosch_camera_friends_list` / `_invite` / `_share` / `_unshare` / `_remove` — `GET/POST/PUT/DELETE /v11/friends/*`. `_share` reads the friend's current shares first and merges the new camera in, rather than replacing the whole share list (Bosch's `PUT /friends/{id}/share` is full-replace on its side — a naive one-entry PUT would silently drop any camera the friend already had).
+- **Firmware install**: `bosch_camera_firmware_status` / `_install` — `GET/PUT /v11/video_inputs/{id}/firmware`, same endpoint the official Bosch app's "Update now" button uses. Guards mirror the HA integration's `async_install_firmware`: refuses if an install is already in progress, or if there is no pending update.
+- **Siren duration**: `bosch_camera_siren_duration_set` — `GET/PUT /v11/video_inputs/{id}/alarm_settings` (`alarmDelayInSeconds`, 10-300 s, Gen2 Indoor II only).
+- **LED lighting schedule**: `bosch_camera_lighting_schedule_get` / `_set` — `GET/PUT /v11/video_inputs/{id}/lighting_options` (outdoor Eyes cameras).
+- **Listen-audio intercom**: `bosch_camera_intercom_open` — opens a live LOCAL/REMOTE connection and returns an RTSPS URL streaming the camera's microphone audio to the caller. Listen-only: two-way talk (caller mic → camera speaker) is not exposed by Bosch's cloud API at all, matching the sister CLI's own limitation.
+
+### CI
+
+- Coverage gate: `pytest --cov-fail-under=96` in the `test` job (measured baseline; ratchets up as coverage improves).
+- `pip-audit -r requirements.txt` (runtime dependencies only) — blocking, 0 vulnerabilities.
+- `pylint` added to the `lint` job (10.00/10, with narrowly-scoped documented disables for this codebase's own architectural patterns — sys.path-injected sister-CLI bridge, `_get_session()` fan-out, error-boundary broad-catches).
+- `codespell` added to the `lint` job.
+- New workflows: `codeql.yml` (weekly + push/PR, `security-extended`), `secret-scan.yml` (gitleaks, full history), `dependency-review.yml` (`fail-on-severity: high` on `pyproject.toml`/`requirements-test.txt` changes).
+
+### Fixed
+
+- `_zone_dicts_to_models`/`_mask_dicts_to_models` now also catch a pydantic `ValidationError` (a present-but-wrong-typed API value, e.g. `"x": "bad"`), not just a missing key — previously a malformed-but-present zone/mask value crashed the whole read instead of being skipped as documented.
+
 ## [v1.6.0] - 2026-07-08
 
 ### Added

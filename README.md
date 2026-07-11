@@ -5,7 +5,7 @@
 > Reuses the proven reverse-engineered API client from the sister
 > [Python CLI tool](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python).
 >
-> **Status:** v1.6.0 — glass-break + smoke/fire-alarm sound detection tools (Gen2 Audio-Plus). 34 tools + 3 resources + 2 prompts, stdio/SSE/streamable-HTTP, pipx/uvx-installable
+> **Status:** v1.7.0 — family-parity closeout: motion zones, privacy masks, automation rules, camera sharing/friends, firmware install, siren duration, lighting schedule, listen-audio intercom. 55 tools + 3 resources + 2 prompts, stdio/SSE/streamable-HTTP, pipx/uvx-installable
 
 [![License][license-shield]](LICENSE)
 [![Project Maintenance][maintenance-shield]][user_profile]
@@ -54,7 +54,7 @@ The sister projects target different runtimes:
 | [Python CLI](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | v10.10.4 | terminal | `bosch_camera ...` commands |
 | [ioBroker Adapter](https://github.com/mosandlt/iobroker.bosch-smart-home-camera) | v1.7.7 | ioBroker | datapoints, VIS-2 widgets (BoschCamera + BoschOverview), JSON-config admin UI |
 | [Node-RED nodes](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-NodeRED) | v0.2.5-alpha | Node-RED | flow nodes for automation pipelines |
-| **MCP Server (this repo)** | **v1.6.0** | **Claude clients** | **MCP tools callable from LLMs** |
+| **MCP Server (this repo)** | **v1.7.0** | **Claude clients** | **MCP tools callable from LLMs** |
 
 LLM use-cases the existing sisters don't cover:
 - "Take a snapshot of the garden camera and describe what you see."
@@ -121,7 +121,7 @@ sequenceDiagram
     Tool-->>Agent: {reachable: true, ip: "...", latency_ms: 12}
 ```
 
-## MCP tools (34 total, v1.6.0)
+## MCP tools (55 total, v1.7.0)
 
 | Tool | Description | Returns |
 |---|---|---|
@@ -159,12 +159,32 @@ sequenceDiagram
 | `bosch_camera_unread_get` | Get unread event count for a camera | `{count}` |
 | `bosch_camera_health_check_all` | Bulk health summary for all cameras (status + WiFi + privacy + last-event + unread) | array of per-camera health dicts |
 | `bosch_camera_token_status` | Local JWT parse — returns validity, expiry, email (no network call) | `{valid, expires_in_min, email}` |
+| `bosch_camera_motion_zones_get` | List motion-detection zone rectangles (normalized 0.0-1.0) | array of `{x, y, w, h}` |
+| `bosch_camera_motion_zones_set` | Replace all motion zones (full-replace, not merge) | array of `{x, y, w, h}` |
+| `bosch_camera_motion_zones_clear` | Remove all motion zones | `[]` |
+| `bosch_camera_privacy_masks_get` | List privacy-mask zone rectangles (normalized 0.0-1.0) | array of `{x, y, w, h}` |
+| `bosch_camera_privacy_masks_set` | Replace all privacy masks (full-replace, not merge) | array of `{x, y, w, h}` |
+| `bosch_camera_privacy_masks_clear` | Remove all privacy masks | `[]` |
+| `bosch_camera_rules_list` | List automation (time-schedule) rules for one camera | array of `{id, name, active, start, end, days}` |
+| `bosch_camera_rules_add` | Create a new schedule rule | `{id, name, active, start, end, days}` |
+| `bosch_camera_rules_edit` | Update an existing rule (partial update) | `{id, name, active, start, end, days}` |
+| `bosch_camera_rules_delete` | Delete a rule | `{deleted, rule_id}` |
+| `bosch_camera_friends_list` | List camera-sharing friends/invitations (account-level) | array of `{id, email, nickname, status, shared_cameras}` |
+| `bosch_camera_friends_invite` | Invite a friend by email (account-level) | `{id, email, nickname, status, shared_cameras}` |
+| `bosch_camera_friends_share` | Share one camera with an existing friend (merges with their existing shares) | `{shared, friend_id, camera}` |
+| `bosch_camera_friends_unshare` | Revoke all camera shares from a friend | `{unshared, friend_id}` |
+| `bosch_camera_friends_remove` | Remove a friend entirely | `{removed, friend_id}` |
+| `bosch_camera_firmware_status` | Get current/latest firmware version + update availability | `{camera, current, up_to_date, update_available, installing}` |
+| `bosch_camera_firmware_install` | Install the pending firmware update (camera reboots 3-7 min) | `{camera, current, up_to_date, update_available, installing}` |
+| `bosch_camera_siren_duration_set` | Set the siren alarm duration, 10-300 s (Gen2 Indoor II only) | `{alarm_delay_seconds}` |
+| `bosch_camera_lighting_schedule_get` | Get the LED lighting schedule (outdoor Eyes cameras) | `{on_time, off_time, light_on_motion, darkness_threshold, schedule_status}` |
+| `bosch_camera_lighting_schedule_set` | Update the LED lighting schedule (outdoor Eyes cameras) | `{on_time, off_time, light_on_motion, darkness_threshold, schedule_status}` |
+| `bosch_camera_intercom_open` | Open a listen-audio session (camera mic → caller); returns an RTSPS URL, listen-only | `{camera, url, expires_in, duration}` |
 
 Tools intentionally NOT exposed to LLMs (write-risky / time-consuming):
 - Token refresh (handled silently by the underlying client)
-- Camera sharing / friends (require user-driven flow)
 - Cloud clip download (large payloads)
-- Audio intercom (timing-sensitive)
+- Two-way talk (caller mic → camera speaker): not exposed by the Bosch cloud API at all (same limitation the sister CLI has) — `bosch_camera_intercom_open` is listen-only
 
 ### Reliability — transparent credential rotation
 
@@ -361,16 +381,17 @@ Bosch-Smart-Home-Camera-Tool-MCP/
 - **v1.5.4** — event timestamps no longer drop the timezone offset: `/v11/events` returns offset-bearing timestamps (e.g. `+02:00[Europe/Berlin]`); the server now strips only the trailing `[zone]` suffix instead of truncating to 19 characters, preserving the explicit UTC offset. ✅
 - **v1.5.5** — `camera_events` resource now uses `eventType + eventTags` for correct event classification. ✅
 - **v1.6.0** — 2 new tools: `bosch_camera_audio_detection_get` / `bosch_camera_audio_detection_set` — glass-break + smoke/fire-alarm sound detection for Gen2 Audio-Plus cameras (cross-port from HA integration v14.2.0). 34 tools total. ✅
+- **v1.7.0** — family-parity closeout (`docs/family-parity-plan.md` §2b): 21 new tools closing the MCP-vs-HA/CLI capability gap — motion zones get/set/clear, privacy masks get/set/clear, automation rules list/add/edit/delete, camera sharing/friends list/invite/share/unshare/remove, firmware status/install (mirrors HA's `async_install_firmware` guard), siren duration, LED lighting schedule get/set, and a listen-audio intercom tool (camera mic → caller, RTSPS URL; two-way talk is not exposed by Bosch's cloud API at all, same limitation as the sister CLI). CI hardening: coverage gate (`--cov-fail-under=96`), `pip-audit` (runtime deps only), `pylint`, `codespell`, CodeQL, gitleaks secret-scan, and a dependency-review workflow — Gold-tier parity with the HA integration's quality gates. 55 tools total. ✅
 
 ## Releases
 
-Latest: **v1.6.0** — see the GitHub release page for full notes:
-[**v1.6.0 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP/releases/tag/v1.6.0)
+Latest: **v1.7.0** — see the GitHub release page for full notes:
+[**v1.7.0 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP/releases/tag/v1.7.0)
 
 | | |
 |---|---|
 | **All releases** | [GitHub Releases page](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP/releases) — every tagged version with notes + downloadable assets |
-| **Full history** | [`CHANGELOG.md`](CHANGELOG.md) — same notes, browseable inside the repo |
+| **Full history** | [`CHANGELOG.md`](CHANGELOG.md) — same notes, browsable inside the repo |
 
 ## Integration Comparison
 
@@ -429,7 +450,7 @@ Part of a five-implementation family for Bosch Smart Home Cameras (plus an alpha
 | 🏆 Home Assistant Integration | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v14.4.1** · HA Quality Scale **Platinum** · production-ready |
 | 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | **v10.10.4** · Mini-NVR + SMB upload (BETA) · LAN-fallback (ping / --local) · PTZ presets · webhook delivery · capture / research / standalone |
 | 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | **v1.7.7** · stable · npm · privacy-toggle Digest rotation · MQTT bridge · PTZ presets · VIS-2 widgets (BoschCamera + BoschOverview) |
-| 🤖 **MCP Server** (this repo) | [Bosch-Smart-Home-Camera-Tool-MCP](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) | **v1.6.0** · cred-rotation · PTZ presets · TOFU cert pinning · cloud CA pinned (CWE-295) · LAN-ping + prefer_local · glass-break/fire-alarm detection · Claude Code / Claude Desktop integration |
+| 🤖 **MCP Server** (this repo) | [Bosch-Smart-Home-Camera-Tool-MCP](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) | **v1.7.0** · cred-rotation · PTZ presets · TOFU cert pinning · cloud CA pinned (CWE-295) · LAN-ping + prefer_local · zones/masks/rules/friends/firmware-install · Claude Code / Claude Desktop integration |
 | 🔴 Node-RED nodes (alpha) | [Bosch-Smart-Home-Camera-Tool-NodeRED](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-NodeRED) | **v0.2.5-alpha** · 4 nodes (event / snapshot / privacy / config) |
 
 Also: [Bosch Smart Home Camera — Python Frontend (NiceGUI)](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python-frontend) — v0.1.5-alpha (dashboard + camera detail + settings) — community interest welcome
