@@ -1,5 +1,10 @@
 # Changelog — Bosch Smart Home Camera MCP Server
 
+## [v1.7.1] - 2026-07-14
+
+Docs-only release: refreshed the sibling-repo version table in README's
+Integration Comparison section (no functional changes).
+
 ## [v1.7.0] - 2026-07-11
 
 ### Added
