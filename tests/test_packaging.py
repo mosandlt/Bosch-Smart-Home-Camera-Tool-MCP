@@ -73,4 +73,4 @@ class TestModuleImport:
         """Canonical version check for v1.7.0 — family-parity closeout."""
         from bosch_camera_mcp import __version__
 
-        assert __version__ == "1.7.0"
+        assert __version__ == "1.7.1"

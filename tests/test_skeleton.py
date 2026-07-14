@@ -30,7 +30,7 @@ from bosch_camera_mcp.server import (
 class TestVersion:
     def test_version_is_v1_7_0(self) -> None:
         """v1.7.0 — family-parity closeout."""
-        assert __version__ == "1.7.0"
+        assert __version__ == "1.7.1"
 
 
 class TestServerApp:
