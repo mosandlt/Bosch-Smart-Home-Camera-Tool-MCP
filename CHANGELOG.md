@@ -1,5 +1,13 @@
 # Changelog — Bosch Smart Home Camera MCP Server
 
+## [v1.7.2] - 2026-07-16
+
+Docs-only release: fixed this repo's own Login row in the shared
+Integration Comparison table (shares the Python CLI's `bosch_config.json`
+rather than its own OAuth2 PKCE flow) and a broader README accuracy pass
+(v1.7.1 sync, stale tool return shapes, expanded CLI co-requirement
+detail). No functional changes.
+
 ## [v1.7.1] - 2026-07-14
 
 Docs-only release: refreshed the sibling-repo version table in README's

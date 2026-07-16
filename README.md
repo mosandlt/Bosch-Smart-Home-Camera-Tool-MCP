@@ -5,7 +5,7 @@
 > Reuses the proven reverse-engineered API client from the sister
 > [Python CLI tool](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python).
 >
-> **Status:** v1.7.1 — family-parity closeout (v1.7.0): motion zones, privacy masks, automation rules, camera sharing/friends, firmware install, siren duration, lighting schedule, listen-audio intercom. 55 tools + 3 resources + 2 prompts, stdio/SSE/streamable-HTTP, pipx/uvx-installable
+> **Status:** v1.7.2 — family-parity closeout (v1.7.0): motion zones, privacy masks, automation rules, camera sharing/friends, firmware install, siren duration, lighting schedule, listen-audio intercom. 55 tools + 3 resources + 2 prompts, stdio/SSE/streamable-HTTP, pipx/uvx-installable
 
 [![License][license-shield]](LICENSE)
 [![Project Maintenance][maintenance-shield]][user_profile]
@@ -50,11 +50,11 @@ The sister projects target different runtimes:
 
 | Project | Version | Runtime | User-facing surface |
 |---|---|---|---|
-| [HA Integration](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | v16.0.0 | Home Assistant | UI entities, Lovelace card, automations |
-| [Python CLI](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | v10.10.6 | terminal | `bosch_camera ...` commands |
-| [ioBroker Adapter](https://github.com/mosandlt/iobroker.bosch-smart-home-camera) | v1.7.8 | ioBroker | datapoints, VIS-2 widgets (BoschCamera + BoschOverview), JSON-config admin UI |
-| [Node-RED nodes](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-NodeRED) | v0.2.7-alpha | Node-RED | flow nodes for automation pipelines |
-| [Frontend (NiceGUI)](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python-frontend) | v0.1.6a0 | standalone web app | dashboard + camera detail + settings UI |
+| [HA Integration](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | v16.0.1 | Home Assistant | UI entities, Lovelace card, automations |
+| [Python CLI](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | v10.12.3 | terminal | `bosch_camera ...` commands |
+| [ioBroker Adapter](https://github.com/mosandlt/iobroker.bosch-smart-home-camera) | v1.8.3 | ioBroker | datapoints, VIS-2 widgets (BoschCamera + BoschOverview), JSON-config admin UI |
+| [Node-RED nodes](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-NodeRED) | v0.4.2-alpha | Node-RED | flow nodes for automation pipelines |
+| [Frontend (NiceGUI)](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python-frontend) | v0.4.2-alpha | standalone web app | dashboard + camera detail + settings UI |
 | **MCP Server (this repo)** | **v1.7.1** | **Claude clients** | **MCP tools callable from LLMs** |
 
 LLM use-cases the existing sisters don't cover:
@@ -124,7 +124,7 @@ sequenceDiagram
     Tool-->>Agent: {reachable: true, ip: "...", latency_ms: 12}
 ```
 
-## MCP tools (55 total, v1.7.1)
+## MCP tools (55 total, v1.7.2)
 
 | Tool | Description | Returns |
 |---|---|---|
@@ -374,12 +374,12 @@ Bosch-Smart-Home-Camera-Tool-MCP/
 - **v1.5.5** — `camera_events` resource now uses `eventType + eventTags` for correct event classification. ✅
 - **v1.6.0** — 2 new tools: `bosch_camera_audio_detection_get` / `bosch_camera_audio_detection_set` — glass-break + smoke/fire-alarm sound detection for Gen2 Audio-Plus cameras (cross-port from HA integration v14.2.0). 34 tools total. ✅
 - **v1.7.0** — family-parity closeout (`docs/family-parity-plan.md` §2b): 21 new tools closing the MCP-vs-HA/CLI capability gap — motion zones get/set/clear, privacy masks get/set/clear, automation rules list/add/edit/delete, camera sharing/friends list/invite/share/unshare/remove, firmware status/install (mirrors HA's `async_install_firmware` guard), siren duration, LED lighting schedule get/set, and a listen-audio intercom tool (camera mic → caller, RTSPS URL; two-way talk is not exposed by Bosch's cloud API at all, same limitation as the sister CLI). CI hardening: coverage gate (`--cov-fail-under=96`), `pip-audit` (runtime deps only), `pylint`, `codespell`, CodeQL, gitleaks secret-scan, and a dependency-review workflow — Gold-tier parity with the HA integration's quality gates. 55 tools total. ✅
-- **v1.7.1** — docs-only: refreshed the sibling-repo version table in the Integration Comparison section, no functional changes. ✅
+- **v1.7.2** — docs-only: fixed this repo's Login row in the Integration Comparison table, no functional changes. ✅
 
 ## Releases
 
-Latest: **v1.7.1** — see the GitHub release page for full notes:
-[**v1.7.1 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP/releases/tag/v1.7.1)
+Latest: **v1.7.2** — see the GitHub release page for full notes:
+[**v1.7.2 release notes →**](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP/releases/tag/v1.7.2)
 
 | | |
 |---|---|
@@ -442,13 +442,13 @@ Part of a five-implementation family for Bosch Smart Home Cameras (plus an alpha
 
 | Implementation | Repo | Status |
 |---|---|---|
-| 🏆 Home Assistant Integration | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v16.0.0** · HA Quality Scale **Platinum** · production-ready |
-| 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | **v10.10.6** · Mini-NVR + SMB upload (BETA) · LAN-fallback (ping / --local) · PTZ presets · webhook delivery · capture / research / standalone |
-| 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | **v1.7.8** · stable · npm · privacy-toggle Digest rotation · MQTT bridge · PTZ presets · VIS-2 widgets (BoschCamera + BoschOverview) |
-| 🤖 **MCP Server** (this repo) | [Bosch-Smart-Home-Camera-Tool-MCP](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) | **v1.7.1** · cred-rotation · PTZ presets · TOFU cert pinning · cloud CA pinned (CWE-295) · LAN-ping + prefer_local · zones/masks/rules/friends/firmware-install · Claude Code / Claude Desktop integration |
-| 🔴 Node-RED nodes (alpha) | [Bosch-Smart-Home-Camera-Tool-NodeRED](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-NodeRED) | **v0.2.7-alpha** · nodes for event / snapshot / privacy / config / more |
+| 🏆 Home Assistant Integration | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | **v16.0.1** · HA Quality Scale **Platinum** · production-ready |
+| 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | **v10.12.3** · Mini-NVR + SMB upload (BETA) · LAN-fallback (ping / --local) · PTZ presets · webhook delivery · capture / research / standalone |
+| 🟢 ioBroker Adapter | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | **v1.8.3** · stable · npm · privacy-toggle Digest rotation · MQTT bridge · PTZ presets · VIS-2 widgets (BoschCamera + BoschOverview) |
+| 🤖 **MCP Server** (this repo) | [Bosch-Smart-Home-Camera-Tool-MCP](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) | **v1.7.2** · cred-rotation · PTZ presets · TOFU cert pinning · cloud CA pinned (CWE-295) · LAN-ping + prefer_local · zones/masks/rules/friends/firmware-install · Claude Code / Claude Desktop integration |
+| 🔴 Node-RED nodes (alpha) | [Bosch-Smart-Home-Camera-Tool-NodeRED](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-NodeRED) | **v0.4.2-alpha** · nodes for event / snapshot / privacy / config / more |
 
-Also: [Bosch Smart Home Camera — Python Frontend (NiceGUI)](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python-frontend) — v0.1.6a0 (dashboard + camera detail + settings) — community interest welcome
+Also: [Bosch Smart Home Camera — Python Frontend (NiceGUI)](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python-frontend) — v0.4.2-alpha (dashboard + camera detail + settings) — community interest welcome
 
 HA stays the **reference implementation** — features land there first; the Python CLI, ioBroker Adapter and MCP Server catch up over time.
 
