@@ -838,7 +838,9 @@ def get_alarm_settings(session: requests.Session, cam_id: str) -> dict[str, Any]
     return {}  # unreachable
 
 
-def set_siren_duration(session: requests.Session, cam_id: str, duration_secs: int) -> dict[str, Any]:
+def set_siren_duration(
+    session: requests.Session, cam_id: str, duration_secs: int
+) -> dict[str, Any]:
     """PUT /v11/video_inputs/{cam_id}/alarm_settings — set siren duration.
 
     Fetches current alarm_settings first (best-effort — a fetch failure still
@@ -993,9 +995,7 @@ def get_motion_zones(session: requests.Session, cam_id: str) -> list[dict[str, A
     Returns a list of {x, y, w, h} normalized (0.0-1.0) zone rectangles.
     Extracted from cmd_zones in bosch_camera.py.
     """
-    r = session.get(
-        f"{CLOUD_API}/v11/video_inputs/{cam_id}/motion_sensitive_areas", timeout=10
-    )
+    r = session.get(f"{CLOUD_API}/v11/video_inputs/{cam_id}/motion_sensitive_areas", timeout=10)
     if r.status_code == 200:
         result = r.json()
         return list(result) if isinstance(result, list) else []
@@ -1320,6 +1320,261 @@ def install_firmware(session: requests.Session, cam_id: str) -> dict[str, Any]:
     return {}  # unreachable
 
 
+# ── Image/video tuning (family-parity 2026-08-19, ported from HA switch.py/number.py) ──
+
+
+def get_timestamp_overlay(session: requests.Session, cam_id: str) -> bool:
+    """GET /v11/video_inputs/{cam_id}/timestamp → {"result": bool}."""
+    r = session.get(f"{CLOUD_API}/v11/video_inputs/{cam_id}/timestamp", timeout=10)
+    if r.status_code == 200:
+        return bool(r.json().get("result", False))
+    _raise_api_error(r, f"get_timestamp_overlay({cam_id})")
+    return False  # unreachable
+
+
+def set_timestamp_overlay(session: requests.Session, cam_id: str, enabled: bool) -> bool:
+    """PUT /v11/video_inputs/{cam_id}/timestamp  Body: {"result": bool}."""
+    r = session.put(
+        f"{CLOUD_API}/v11/video_inputs/{cam_id}/timestamp",
+        json={"result": enabled},
+        headers={"Content-Type": "application/json"},
+        timeout=10,
+    )
+    if r.status_code in (200, 201, 204):
+        return True
+    _raise_api_error(r, f"set_timestamp_overlay({cam_id}, {enabled})")
+    return False
+
+
+def get_status_led(session: requests.Session, cam_id: str) -> bool:
+    """GET /v11/video_inputs/{cam_id}/ledlights → {"state": "ON"/"OFF"} (Gen2 only)."""
+    r = session.get(f"{CLOUD_API}/v11/video_inputs/{cam_id}/ledlights", timeout=10)
+    if r.status_code == 200:
+        return str(r.json().get("state", "OFF")).upper() == "ON"
+    _raise_api_error(r, f"get_status_led({cam_id})")
+    return False  # unreachable
+
+
+def set_status_led(session: requests.Session, cam_id: str, enabled: bool) -> bool:
+    """PUT /v11/video_inputs/{cam_id}/ledlights  Body: {"state": "ON"/"OFF"} (Gen2 only)."""
+    r = session.put(
+        f"{CLOUD_API}/v11/video_inputs/{cam_id}/ledlights",
+        json={"state": "ON" if enabled else "OFF"},
+        headers={"Content-Type": "application/json"},
+        timeout=10,
+    )
+    if r.status_code in (200, 201, 204):
+        return True
+    _raise_api_error(r, f"set_status_led({cam_id}, {enabled})")
+    return False
+
+
+def get_lens_elevation(session: requests.Session, cam_id: str) -> float:
+    """GET /v11/video_inputs/{cam_id}/lens_elevation → {"elevation": float} (Gen2 only)."""
+    r = session.get(f"{CLOUD_API}/v11/video_inputs/{cam_id}/lens_elevation", timeout=10)
+    if r.status_code == 200:
+        return float(r.json().get("elevation", 0.0))
+    _raise_api_error(r, f"get_lens_elevation({cam_id})")
+    return 0.0  # unreachable
+
+
+def set_lens_elevation(session: requests.Session, cam_id: str, meters: float) -> bool:
+    """PUT /v11/video_inputs/{cam_id}/lens_elevation  Body: {"elevation": float} (Gen2 only)."""
+    r = session.put(
+        f"{CLOUD_API}/v11/video_inputs/{cam_id}/lens_elevation",
+        json={"elevation": round(meters, 2)},
+        headers={"Content-Type": "application/json"},
+        timeout=10,
+    )
+    if r.status_code in (200, 201, 204):
+        return True
+    _raise_api_error(r, f"set_lens_elevation({cam_id}, {meters})")
+    return False
+
+
+def get_global_lighting(session: requests.Session, cam_id: str) -> dict[str, Any]:
+    """GET /v11/video_inputs/{cam_id}/lighting → {"darknessThreshold": float 0-1, "softLightFading": bool}."""
+    r = session.get(f"{CLOUD_API}/v11/video_inputs/{cam_id}/lighting", timeout=10)
+    if r.status_code == 200:
+        return dict(r.json())
+    _raise_api_error(r, f"get_global_lighting({cam_id})")
+    return {}  # unreachable
+
+
+def set_global_lighting(
+    session: requests.Session,
+    cam_id: str,
+    darkness_threshold: Optional[float] = None,
+    soft_light_fading: Optional[bool] = None,
+) -> dict[str, Any]:
+    """PUT /v11/video_inputs/{cam_id}/lighting — full-body write (API requires both fields).
+
+    Missing arguments are filled from a fresh GET so a partial write never
+    clobbers the field the caller didn't intend to change (mirrors HA's
+    BoschSoftLightFadingSwitch / BoschDarknessThresholdNumber, which always
+    read the current cache before writing the sibling field).
+    ``darkness_threshold`` is a fraction 0.0-1.0 (not the 0-100 % UI scale).
+    """
+    current = get_global_lighting(session, cam_id)
+    body = {
+        "darknessThreshold": (
+            darkness_threshold
+            if darkness_threshold is not None
+            else current.get("darknessThreshold", 0.5)
+        ),
+        "softLightFading": (
+            soft_light_fading
+            if soft_light_fading is not None
+            else current.get("softLightFading", True)
+        ),
+    }
+    r = session.put(
+        f"{CLOUD_API}/v11/video_inputs/{cam_id}/lighting",
+        json=body,
+        headers={"Content-Type": "application/json"},
+        timeout=10,
+    )
+    if r.status_code in (200, 201, 204):
+        return body
+    _raise_api_error(r, f"set_global_lighting({cam_id})")
+    return {}  # unreachable
+
+
+_LIGHT_SWITCH_DEFAULT: dict[str, Any] = {"brightness": 0, "color": None, "whiteBalance": 0.0}
+_LIGHT_SWITCH_GROUPS = ("frontLightSettings", "topLedLightSettings", "bottomLedLightSettings")
+
+
+def get_lighting_switch(session: requests.Session, cam_id: str) -> dict[str, Any]:
+    """GET /v11/video_inputs/{cam_id}/lighting/switch (Gen2 only).
+
+    Returns frontLightSettings/topLedLightSettings/bottomLedLightSettings.
+    """
+    r = session.get(f"{CLOUD_API}/v11/video_inputs/{cam_id}/lighting/switch", timeout=10)
+    if r.status_code == 200:
+        return dict(r.json())
+    _raise_api_error(r, f"get_lighting_switch({cam_id})")
+    return {}  # unreachable
+
+
+def _lighting_switch_body(cached: dict[str, Any]) -> dict[str, Any]:
+    """Build the full lighting/switch PUT body from a cached GET (API requires all 3 groups)."""
+    return {k: cached.get(k, _LIGHT_SWITCH_DEFAULT) for k in _LIGHT_SWITCH_GROUPS}
+
+
+def set_white_balance(session: requests.Session, cam_id: str, value: float) -> dict[str, Any]:
+    """PUT /v11/video_inputs/{cam_id}/lighting/switch — set frontLightSettings.whiteBalance.
+
+    ``value`` is -1.0 (cool/blue) .. 1.0 (warm/orange). Fetches the current
+    state first and sends the full 3-group body (API requirement) — only
+    ``frontLightSettings`` is modified, ``color`` is reset to null to match
+    HA's own write (whiteBalance and color are mutually exclusive on the
+    camera side).
+    """
+    current = get_lighting_switch(session, cam_id)
+    body = _lighting_switch_body(current)
+    body["frontLightSettings"] = {
+        **body["frontLightSettings"],
+        "whiteBalance": round(value, 2),
+        "color": None,
+    }
+    r = session.put(
+        f"{CLOUD_API}/v11/video_inputs/{cam_id}/lighting/switch",
+        json=body,
+        headers={"Content-Type": "application/json"},
+        timeout=10,
+    )
+    if r.status_code in (200, 201, 204):
+        return body
+    _raise_api_error(r, f"set_white_balance({cam_id}, {value})")
+    return {}  # unreachable
+
+
+_LED_POSITION_KEYS = {"top": "topLedLightSettings", "bottom": "bottomLedLightSettings"}
+
+
+def set_led_brightness(
+    session: requests.Session, cam_id: str, position: str, brightness_percent: int
+) -> dict[str, Any]:
+    """PUT /v11/video_inputs/{cam_id}/lighting/switch — set top/bottom LED brightness 0-100.
+
+    ``position`` must be "top" or "bottom". Fetches the current state first
+    and sends the full 3-group body (API requirement).
+    """
+    led_key = _LED_POSITION_KEYS[position]
+    current = get_lighting_switch(session, cam_id)
+    body = _lighting_switch_body(current)
+    body[led_key] = {**body[led_key], "brightness": round(brightness_percent)}
+    r = session.put(
+        f"{CLOUD_API}/v11/video_inputs/{cam_id}/lighting/switch",
+        json=body,
+        headers={"Content-Type": "application/json"},
+        timeout=10,
+    )
+    if r.status_code in (200, 201, 204):
+        return body
+    _raise_api_error(r, f"set_led_brightness({cam_id}, {position}, {brightness_percent})")
+    return {}  # unreachable
+
+
+def soft_reset_camera(session: requests.Session, cam_id: str) -> bool:
+    """PUT /v11/video_inputs/{cam_id}/soft_reset — reboot the camera (empty body).
+
+    Sends a truly empty body (``data=""``), matching the decompiled Bosch
+    app's behavior and HA's ``async_put_camera(cam_id, "soft_reset", None)``.
+    Known to return 404 sh:entity.notfound against real hardware even when
+    the request matches the app byte-for-byte (HA's button entity is
+    disabled by default for this reason) — callers should treat a 404 here
+    as "not supported by this endpoint/account", not a bug.
+    """
+    r = session.put(
+        f"{CLOUD_API}/v11/video_inputs/{cam_id}/soft_reset",
+        data="",
+        headers={"Content-Type": "application/json"},
+        timeout=10,
+    )
+    if r.status_code in (200, 201, 204):
+        return True
+    _raise_api_error(r, f"soft_reset_camera({cam_id})")
+    return False
+
+
+def hard_reset_camera(session: requests.Session, cam_id: str) -> bool:
+    """PUT /v11/video_inputs/{cam_id}/hard_reset — factory-reset the camera (empty body).
+
+    DESTRUCTIVE: unpairs the camera from the Bosch account; it must be
+    re-commissioned via the Bosch app before it will work with this
+    integration/tool again. Sends a truly empty body (``data=""``), matching
+    the decompiled Bosch app and HA's ``async_put_camera(cam_id, "hard_reset", None)``.
+    """
+    r = session.put(
+        f"{CLOUD_API}/v11/video_inputs/{cam_id}/hard_reset",
+        data="",
+        headers={"Content-Type": "application/json"},
+        timeout=10,
+    )
+    if r.status_code in (200, 201, 204):
+        return True
+    _raise_api_error(r, f"hard_reset_camera({cam_id})")
+    return False
+
+
+def rename_camera(session: requests.Session, cam_id: str, new_name: str, time_zone: str) -> bool:
+    """PUT /v11/video_inputs  Body: {"videoInputId", "title", "timeZone"} — rename a camera.
+
+    Extracted from HA's services.py ``handle_rename_camera``.
+    """
+    r = session.put(
+        f"{CLOUD_API}/v11/video_inputs",
+        json={"videoInputId": cam_id, "title": new_name, "timeZone": time_zone},
+        headers={"Content-Type": "application/json"},
+        timeout=10,
+    )
+    if r.status_code in (200, 201, 204):
+        return True
+    _raise_api_error(r, f"rename_camera({cam_id}, {new_name!r})")
+    return False
+
+
 def _raise_api_error(resp: requests.Response, context: str) -> None:
     """Translate a non-success HTTP response to an MCPError."""
     from bosch_camera_mcp.errors import MCPError
@@ -1328,8 +1583,7 @@ def _raise_api_error(resp: requests.Response, context: str) -> None:
         raise MCPError(
             code="reauth_required",
             detail=(
-                f"API returned 401 during {context}. "
-                "Run `python3 bosch_camera.py token browser`."
+                f"API returned 401 during {context}. Run `python3 bosch_camera.py token browser`."
             ),
         )
     if resp.status_code == 403:

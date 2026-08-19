@@ -2,4 +2,6 @@
 skip = .git,dist,*.egg-info,backups,uv.lock,package-lock.json,htmlcov
 # upToDate: the literal Bosch cloud API JSON field name (GET/PUT .../firmware),
 # not a typo — must stay camelCase to match the wire format exactly.
-ignore-words-list = uptodate
+# hass: Home Assistant's own internal object name (e.g. hass.config.path),
+# referenced when documenting cross-repo differences — not a typo for "hash".
+ignore-words-list = uptodate,hass

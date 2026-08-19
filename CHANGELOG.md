@@ -1,5 +1,19 @@
 # Changelog — Bosch Smart Home Camera MCP Server
 
+## [v1.7.3] - 2026-08-19
+
+### Added
+
+Family-parity re-sync vs HA v16.1.12 (`docs/family-parity-plan.md` 2026-08-19 audit) — 15 new tools closing the image/video tuning gap, the largest undocumented gap by entity count. 70 tools total.
+
+- Image/video tuning surface: `bosch_camera_timestamp_overlay_get/set`, `bosch_camera_status_led_get/set`, `bosch_camera_lens_elevation_get/set` (0.5–5.0m), `bosch_camera_darkness_threshold_get/set` (0–100%, GET-merge-PUT preserving the sibling field), `bosch_camera_white_balance_get/set` (-1.0..1.0, full 3-group body GET-merge), `bosch_camera_led_brightness_get/set` (top/bottom position). All ranges/endpoints/body shapes read directly from the HA integration's source, not guessed.
+- `bosch_camera_soft_reset` / `bosch_camera_hard_reset` (button.py equivalents) — hard_reset requires `confirm=True` (unpairs the camera).
+- `bosch_camera_rename` — ported verbatim from HA's `handle_rename_camera`.
+
+Deliberately NOT ported (architecture mismatch, documented in README): `open_live_connection`, the Frigate/external-RTSP front door, `delete_event`/`send_event_webhook`, AI alert history read-back, and the purely client-side `video_quality`/`stream_mode`/`image_rotation_180` selects — see README for the per-item reasoning.
+
+628 pytest (26 new) / 96.17% coverage / ruff / mypy --strict / pylint 10.00 / codespell clean.
+
 ## [v1.7.2] - 2026-07-16
 
 Docs-only release: fixed this repo's own Login row in the shared

@@ -75,7 +75,9 @@ class SnapshotResult(BaseModel):
     """Path-based snapshot result."""
 
     path: str = Field(description="Filesystem path to the saved JPEG")
-    method: str = Field(description="Source: local_lan (LAN-only; cloud fallback removed in v1.1.0)")
+    method: str = Field(
+        description="Source: local_lan (LAN-only; cloud fallback removed in v1.1.0)"
+    )
     timestamp: str = Field(description="ISO 8601 capture time")
 
 
@@ -83,7 +85,9 @@ class StreamUrlResult(BaseModel):
     """LAN RTSPS stream URL result."""
 
     camera: str = Field(description="Canonical camera name from config")
-    rtsps_url: str = Field(description="LAN RTSPS URL via TLS proxy (rtsps://<user>:<pass>@<ip>:443/...)")
+    rtsps_url: str = Field(
+        description="LAN RTSPS URL via TLS proxy (rtsps://<user>:<pass>@<ip>:443/...)"
+    )
     note: str = "LAN-only — MCP host must be on the same network as the camera."
 
 
@@ -127,9 +131,7 @@ class IntrusionConfig(BaseModel):
     sensitivity: Optional[int] = Field(
         default=None, description="Detection sensitivity (0-7; 0=low, 7=high)"
     )
-    distance: Optional[int] = Field(
-        default=None, description="Detection distance in meters (1-8)"
-    )
+    distance: Optional[int] = Field(default=None, description="Detection distance in meters (1-8)")
 
 
 class AudioDetectionConfig(BaseModel):
@@ -152,9 +154,7 @@ class AudioDetectionConfig(BaseModel):
 class WifiInfo(BaseModel):
     """WiFi signal information returned by bosch_camera_wifi."""
 
-    rssi: Optional[int] = Field(
-        default=None, description="Raw RSSI in dBm (negative; e.g. -67)"
-    )
+    rssi: Optional[int] = Field(default=None, description="Raw RSSI in dBm (negative; e.g. -67)")
     ssid: Optional[str] = Field(default=None, description="Connected WiFi SSID")
     signal_strength: Optional[int] = Field(
         default=None,
@@ -212,9 +212,7 @@ class CameraHealthEntry(BaseModel):
     wifi_signal_strength: Optional[int] = None
     last_event_at: Optional[str] = None
     unread_count: int = 0
-    error: Optional[str] = Field(
-        default=None, description="Set when this camera's check failed"
-    )
+    error: Optional[str] = Field(default=None, description="Set when this camera's check failed")
 
 
 class TokenStatus(BaseModel):
@@ -298,6 +296,50 @@ class FirmwareStatus(BaseModel):
     installing: bool = Field(
         default=False, description="Whether an install is currently in progress"
     )
+
+
+class TimestampOverlayConfig(BaseModel):
+    """Timestamp overlay config returned by bosch_camera_timestamp_overlay_get/set."""
+
+    enabled: bool = Field(description="Whether a date/time overlay is burned into the video")
+
+
+class StatusLedConfig(BaseModel):
+    """Status LED config returned by bosch_camera_status_led_get/set (Gen2 only)."""
+
+    enabled: bool = Field(description="Whether the camera's status LED is lit")
+
+
+class LensElevationConfig(BaseModel):
+    """Lens mounting height returned by bosch_camera_lens_elevation_get/set (Gen2 only)."""
+
+    meters: float = Field(
+        description="Mounting height in meters, used for person-detection perspective correction"
+    )
+
+
+class DarknessThresholdConfig(BaseModel):
+    """Day/night lighting config returned by bosch_camera_darkness_threshold_get/set (Gen2 only)."""
+
+    threshold_percent: float = Field(
+        description="Ambient-darkness trigger threshold, 0=always day .. 100=always night"
+    )
+    soft_light_fading: bool = Field(
+        description="Whether lights fade smoothly (True) or snap on/off (False)"
+    )
+
+
+class WhiteBalanceConfig(BaseModel):
+    """Front light white balance returned by bosch_camera_white_balance_get/set (Gen2 only)."""
+
+    value: float = Field(description="-1.0 (cool/blue) .. 1.0 (warm/orange), 0.0 = neutral")
+
+
+class LedBrightnessConfig(BaseModel):
+    """Top/bottom LED brightness returned by bosch_camera_led_brightness_get/set (Gen2 only)."""
+
+    position: str = Field(description="'top' or 'bottom'")
+    brightness_percent: float = Field(description="0-100 %")
 
 
 class LightingSchedule(BaseModel):
@@ -563,13 +605,7 @@ def bosch_camera_snapshot(camera: str) -> SnapshotResult:
 
     # Build cache directory
     safe_name = name.replace(" ", "_")
-    cache_dir = (
-        Path.home()
-        / ".cache"
-        / "bosch-camera-mcp"
-        / "snapshots"
-        / safe_name
-    )
+    cache_dir = Path.home() / ".cache" / "bosch-camera-mcp" / "snapshots" / safe_name
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     # Filename uses `-` for the time part because `:` is illegal on FAT/NTFS;
@@ -795,17 +831,17 @@ async def bosch_camera_privacy_set(
                 )
 
             ok = await rcp_local_write_privacy(
-                local_ip, enabled,
-                user=local_user, password=local_pass,
+                local_ip,
+                enabled,
+                user=local_user,
+                password=local_pass,
                 on_401=_on_401_privacy,
             )
             if ok:
                 logger.info(
                     "privacy_set(%s, %s): succeeded via LOCAL RCP (%s)", name, enabled, local_ip
                 )
-                return await asyncio.to_thread(
-                    _locked, _build_status, name, cam_info, session, cfg
-                )
+                return await asyncio.to_thread(_locked, _build_status, name, cam_info, session, cfg)
             logger.warning(
                 "privacy_set(%s, %s): LOCAL RCP failed (%s), falling back to cloud",
                 name,
@@ -876,17 +912,17 @@ async def bosch_camera_light_set(
                 )
 
             ok = await rcp_local_write_front_light(
-                local_ip, brightness,
-                user=local_user, password=local_pass,
+                local_ip,
+                brightness,
+                user=local_user,
+                password=local_pass,
                 on_401=_on_401_light,
             )
             if ok:
                 logger.info(
                     "light_set(%s, %s): succeeded via LOCAL RCP (%s)", name, enabled, local_ip
                 )
-                return await asyncio.to_thread(
-                    _locked, _build_status, name, cam_info, session, cfg
-                )
+                return await asyncio.to_thread(_locked, _build_status, name, cam_info, session, cfg)
             logger.warning(
                 "light_set(%s, %s): LOCAL RCP failed (%s), falling back to cloud",
                 name,
@@ -894,9 +930,7 @@ async def bosch_camera_light_set(
                 local_ip,
             )
 
-    return await asyncio.to_thread(
-        _locked, _light_set_cloud, session, cfg, name, cam_info, enabled
-    )
+    return await asyncio.to_thread(_locked, _light_set_cloud, session, cfg, name, cam_info, enabled)
 
 
 @_blocking_tool
@@ -1095,7 +1129,12 @@ def bosch_camera_lighting_schedule_set(
         light_on_motion: Whether motion also triggers the light.
         darkness_threshold: Ambient-darkness trigger threshold, 0.0-1.0.
     """
-    if on_time is None and off_time is None and light_on_motion is None and darkness_threshold is None:
+    if (
+        on_time is None
+        and off_time is None
+        and light_on_motion is None
+        and darkness_threshold is None
+    ):
         raise MCPError(
             code="invalid_argument",
             detail="At least one of on_time, off_time, light_on_motion, darkness_threshold must be provided.",
@@ -1632,19 +1671,10 @@ async def bosch_camera_mjpeg_snapshot(camera: str) -> dict[str, Any]:
         )
 
     auth_prefix = f"{_q(local_user, safe='')}:{_q(local_pass, safe='')}@"
-    rtsp_url = (
-        f"rtsps://{auth_prefix}{local_ip}:443"
-        "/rtsp_tunnel?inst=3&enableaudio=0&fmtp=1"
-    )
+    rtsp_url = f"rtsps://{auth_prefix}{local_ip}:443/rtsp_tunnel?inst=3&enableaudio=0&fmtp=1"
 
     safe_name = name.replace(" ", "_")
-    cache_dir = (
-        Path.home()
-        / ".cache"
-        / "bosch-camera-mcp"
-        / "snapshots"
-        / safe_name
-    )
+    cache_dir = Path.home() / ".cache" / "bosch-camera-mcp" / "snapshots" / safe_name
     cache_dir.mkdir(parents=True, exist_ok=True)
     now = datetime.datetime.now()
     ts_fs = now.strftime("%Y-%m-%dT%H-%M-%S")
@@ -1654,10 +1684,14 @@ async def bosch_camera_mjpeg_snapshot(camera: str) -> dict[str, Any]:
     try:
         proc = await asyncio.create_subprocess_exec(
             "ffmpeg",
-            "-rtsp_transport", "tcp",
-            "-i", rtsp_url,
-            "-vframes", "1",
-            "-f", "image2",
+            "-rtsp_transport",
+            "tcp",
+            "-i",
+            rtsp_url,
+            "-vframes",
+            "1",
+            "-f",
+            "image2",
             "-y",
             str(out_path),
             stdout=asyncio.subprocess.DEVNULL,
@@ -1828,13 +1862,16 @@ def bosch_camera_feature_flags() -> dict[str, Any]:
         data = r.json()
         # API may return a list of {name, enabled} or a flat dict — normalise both
         if isinstance(data, list):
-            return {item.get("name", str(i)): bool(item.get("enabled", False))
-                    for i, item in enumerate(data)}
+            return {
+                item.get("name", str(i)): bool(item.get("enabled", False))
+                for i, item in enumerate(data)
+            }
         if isinstance(data, dict):
             return {k: bool(v) for k, v in data.items()}
         return {"raw": data}
 
     from .adapters.cli_bridge import _raise_api_error  # noqa: PLC0415
+
     _raise_api_error(r, "bosch_camera_feature_flags")
     return {}  # unreachable
 
@@ -1911,7 +1948,8 @@ def bosch_camera_motion_set(
 
     try:
         br.set_motion_config(
-            session, cam_info["id"],
+            session,
+            cam_info["id"],
             enabled=enabled,
             sensitivity=sensitivity.upper() if sensitivity else None,
         )
@@ -2199,22 +2237,26 @@ def bosch_camera_health_check_all() -> list[CameraHealthEntry]:
             # Unread count from listing
             unread_count = int(listing_entry.get("numberOfUnreadEvents", 0))
 
-            results.append(CameraHealthEntry(
-                name=name,
-                status=status,
-                privacy_mode=privacy_mode,
-                wifi_rssi=wifi_rssi,
-                wifi_signal_strength=wifi_strength,
-                last_event_at=last_event_at,
-                unread_count=unread_count,
-            ))
+            results.append(
+                CameraHealthEntry(
+                    name=name,
+                    status=status,
+                    privacy_mode=privacy_mode,
+                    wifi_rssi=wifi_rssi,
+                    wifi_signal_strength=wifi_strength,
+                    last_event_at=last_event_at,
+                    unread_count=unread_count,
+                )
+            )
         except Exception as exc:
-            results.append(CameraHealthEntry(
-                name=name,
-                status="UNKNOWN",
-                privacy_mode=False,
-                error=str(exc),
-            ))
+            results.append(
+                CameraHealthEntry(
+                    name=name,
+                    status="UNKNOWN",
+                    privacy_mode=False,
+                    error=str(exc),
+                )
+            )
 
     return results
 
@@ -2347,9 +2389,7 @@ def _validate_hhmm(value: str, field: str, cam_name: str) -> None:
 
 def _friend_dict_to_model(raw: dict[str, Any]) -> Friend:
     shared = raw.get("sharedVideoInputs", raw.get("shares", []))
-    shared_ids = [
-        s.get("videoInputId", s) if isinstance(s, dict) else s for s in (shared or [])
-    ]
+    shared_ids = [s.get("videoInputId", s) if isinstance(s, dict) else s for s in (shared or [])]
     return Friend(
         id=str(raw.get("id", "")),
         email=raw.get("email") or raw.get("invitationEmail"),
@@ -2384,9 +2424,7 @@ def bosch_camera_motion_zones_get(camera: str) -> list[MotionZone]:
 
 
 @_blocking_tool
-def bosch_camera_motion_zones_set(
-    camera: str, zones: list[dict[str, float]]
-) -> list[MotionZone]:
+def bosch_camera_motion_zones_set(camera: str, zones: list[dict[str, float]]) -> list[MotionZone]:
     """Replace ALL motion-detection zones for one camera with the given list.
 
     This is a full replace, not a merge — pass every zone you want to keep.
@@ -2459,9 +2497,7 @@ def bosch_camera_privacy_masks_get(camera: str) -> list[PrivacyMask]:
 
 
 @_blocking_tool
-def bosch_camera_privacy_masks_set(
-    camera: str, masks: list[dict[str, float]]
-) -> list[PrivacyMask]:
+def bosch_camera_privacy_masks_set(camera: str, masks: list[dict[str, float]]) -> list[PrivacyMask]:
     """Replace ALL privacy-mask zones for one camera with the given list.
 
     Full replace, not a merge. Each mask is ``{"x": ..., "y": ..., "w": ...,
@@ -2722,6 +2758,424 @@ def bosch_camera_firmware_install(camera: str) -> FirmwareStatus:
     )
 
 
+@_blocking_tool
+def bosch_camera_timestamp_overlay_get(camera: str) -> TimestampOverlayConfig:
+    """Get whether a date/time overlay is burned into the video for one camera.
+
+    API: GET /v11/video_inputs/{id}/timestamp.
+    """
+    br = _bridge()
+    _cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    try:
+        enabled = br.get_timestamp_overlay(session, cam_info["id"])
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
+    return TimestampOverlayConfig(enabled=enabled)
+
+
+@_blocking_tool
+def bosch_camera_timestamp_overlay_set(camera: str, enabled: bool) -> TimestampOverlayConfig:
+    """Turn the date/time video overlay on or off for one camera.
+
+    API: PUT /v11/video_inputs/{id}/timestamp  Body: {"result": bool}.
+    """
+    br = _bridge()
+    _cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    try:
+        br.set_timestamp_overlay(session, cam_info["id"], enabled)
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
+    return TimestampOverlayConfig(enabled=enabled)
+
+
+@_blocking_tool
+def bosch_camera_status_led_get(camera: str) -> StatusLedConfig:
+    """Get the camera's status LED on/off state. Gen2 cameras only.
+
+    API: GET /v11/video_inputs/{id}/ledlights.
+    """
+    br = _bridge()
+    _cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    try:
+        enabled = br.get_status_led(session, cam_info["id"])
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
+    return StatusLedConfig(enabled=enabled)
+
+
+@_blocking_tool
+def bosch_camera_status_led_set(camera: str, enabled: bool) -> StatusLedConfig:
+    """Turn the camera's status LED on or off. Gen2 cameras only.
+
+    API: PUT /v11/video_inputs/{id}/ledlights  Body: {"state": "ON"/"OFF"}.
+    """
+    br = _bridge()
+    _cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    try:
+        br.set_status_led(session, cam_info["id"], enabled)
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
+    return StatusLedConfig(enabled=enabled)
+
+
+@_blocking_tool
+def bosch_camera_lens_elevation_get(camera: str) -> LensElevationConfig:
+    """Get the configured lens mounting height (meters). Gen2 cameras only.
+
+    Used by the camera for perspective correction in person detection.
+    API: GET /v11/video_inputs/{id}/lens_elevation.
+    """
+    br = _bridge()
+    _cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    try:
+        meters = br.get_lens_elevation(session, cam_info["id"])
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
+    return LensElevationConfig(meters=meters)
+
+
+@_blocking_tool
+def bosch_camera_lens_elevation_set(camera: str, meters: float) -> LensElevationConfig:
+    """Set the lens mounting height in meters (0.5-5.0). Gen2 cameras only.
+
+    API: PUT /v11/video_inputs/{id}/lens_elevation  Body: {"elevation": float}.
+    """
+    br = _bridge()
+    _cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    if not 0.5 <= meters <= 5.0:
+        raise MCPError(
+            code="invalid_argument",
+            detail=f"meters={meters!r} out of range. Must be 0.5-5.0.",
+            camera=name,
+        )
+    try:
+        br.set_lens_elevation(session, cam_info["id"], meters)
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
+    return LensElevationConfig(meters=meters)
+
+
+@_blocking_tool
+def bosch_camera_darkness_threshold_get(camera: str) -> DarknessThresholdConfig:
+    """Get the day/night lighting threshold and fading mode. Gen2 cameras only.
+
+    0% = always day, 100% = always night.
+    API: GET /v11/video_inputs/{id}/lighting.
+    """
+    br = _bridge()
+    _cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    try:
+        raw = br.get_global_lighting(session, cam_info["id"])
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
+    return DarknessThresholdConfig(
+        threshold_percent=round(float(raw.get("darknessThreshold", 0.0)) * 100, 1),
+        soft_light_fading=bool(raw.get("softLightFading", True)),
+    )
+
+
+@_blocking_tool
+def bosch_camera_darkness_threshold_set(
+    camera: str,
+    threshold_percent: Optional[float] = None,
+    soft_light_fading: Optional[bool] = None,
+) -> DarknessThresholdConfig:
+    """Set the day/night lighting threshold and/or fading mode. Gen2 cameras only.
+
+    At least one of ``threshold_percent`` (0-100) or ``soft_light_fading`` must
+    be provided; the other field is preserved from the camera's current setting.
+
+    API: PUT /v11/video_inputs/{id}/lighting  Body: {"darknessThreshold", "softLightFading"}.
+    """
+    br = _bridge()
+    _cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    if threshold_percent is None and soft_light_fading is None:
+        raise MCPError(
+            code="invalid_argument",
+            detail="At least one of threshold_percent or soft_light_fading must be provided.",
+            camera=name,
+        )
+    if threshold_percent is not None and not 0 <= threshold_percent <= 100:
+        raise MCPError(
+            code="invalid_argument",
+            detail=f"threshold_percent={threshold_percent!r} out of range. Must be 0-100.",
+            camera=name,
+        )
+    fraction = threshold_percent / 100 if threshold_percent is not None else None
+    try:
+        body = br.set_global_lighting(
+            session,
+            cam_info["id"],
+            darkness_threshold=fraction,
+            soft_light_fading=soft_light_fading,
+        )
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
+    return DarknessThresholdConfig(
+        threshold_percent=round(float(body.get("darknessThreshold", 0.0)) * 100, 1),
+        soft_light_fading=bool(body.get("softLightFading", True)),
+    )
+
+
+@_blocking_tool
+def bosch_camera_white_balance_get(camera: str) -> WhiteBalanceConfig:
+    """Get the front light's white balance (-1.0 cool .. 1.0 warm). Gen2 cameras only.
+
+    API: GET /v11/video_inputs/{id}/lighting/switch.
+    """
+    br = _bridge()
+    _cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    try:
+        raw = br.get_lighting_switch(session, cam_info["id"])
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
+    front = raw.get("frontLightSettings") or {}
+    return WhiteBalanceConfig(value=float(front.get("whiteBalance", 0.0)))
+
+
+@_blocking_tool
+def bosch_camera_white_balance_set(camera: str, value: float) -> WhiteBalanceConfig:
+    """Set the front light's white balance (-1.0 cool/blue .. 1.0 warm/orange). Gen2 cameras only.
+
+    API: PUT /v11/video_inputs/{id}/lighting/switch (full-body write, GET-merged).
+    """
+    br = _bridge()
+    _cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    if not -1.0 <= value <= 1.0:
+        raise MCPError(
+            code="invalid_argument",
+            detail=f"value={value!r} out of range. Must be -1.0 to 1.0.",
+            camera=name,
+        )
+    try:
+        body = br.set_white_balance(session, cam_info["id"], value)
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
+    front = body.get("frontLightSettings") or {}
+    return WhiteBalanceConfig(value=float(front.get("whiteBalance", value)))
+
+
+@_blocking_tool
+def bosch_camera_led_brightness_get(camera: str, position: str) -> LedBrightnessConfig:
+    """Get top or bottom LED brightness (0-100%). Gen2 cameras only.
+
+    ``position`` must be "top" or "bottom".
+    API: GET /v11/video_inputs/{id}/lighting/switch.
+    """
+    br = _bridge()
+    _cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    pos = position.lower().strip()
+    if pos not in ("top", "bottom"):
+        raise MCPError(
+            code="invalid_argument",
+            detail=f"position={position!r} is not valid. Must be 'top' or 'bottom'.",
+            camera=name,
+        )
+    try:
+        raw = br.get_lighting_switch(session, cam_info["id"])
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
+    led_key = "topLedLightSettings" if pos == "top" else "bottomLedLightSettings"
+    led = raw.get(led_key) or {}
+    return LedBrightnessConfig(position=pos, brightness_percent=float(led.get("brightness", 0)))
+
+
+@_blocking_tool
+def bosch_camera_led_brightness_set(
+    camera: str, position: str, brightness_percent: float
+) -> LedBrightnessConfig:
+    """Set top or bottom LED brightness (0-100%). Gen2 cameras only.
+
+    ``position`` must be "top" or "bottom".
+    API: PUT /v11/video_inputs/{id}/lighting/switch (full-body write, GET-merged).
+    """
+    br = _bridge()
+    _cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    pos = position.lower().strip()
+    if pos not in ("top", "bottom"):
+        raise MCPError(
+            code="invalid_argument",
+            detail=f"position={position!r} is not valid. Must be 'top' or 'bottom'.",
+            camera=name,
+        )
+    if not 0 <= brightness_percent <= 100:
+        raise MCPError(
+            code="invalid_argument",
+            detail=f"brightness_percent={brightness_percent!r} out of range. Must be 0-100.",
+            camera=name,
+        )
+    try:
+        body = br.set_led_brightness(session, cam_info["id"], pos, brightness_percent)
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
+    led_key = "topLedLightSettings" if pos == "top" else "bottomLedLightSettings"
+    led = body.get(led_key) or {}
+    return LedBrightnessConfig(
+        position=pos, brightness_percent=float(led.get("brightness", brightness_percent))
+    )
+
+
+@_blocking_tool
+def bosch_camera_soft_reset(camera: str) -> dict[str, Any]:
+    """Reboot one camera (soft reset). The camera briefly drops offline.
+
+    API: PUT /v11/video_inputs/{id}/soft_reset (empty body).
+    NOTE: on real hardware this has been observed to return HTTP 404
+    ``sh:entity.notfound`` even when the request matches the official Bosch
+    app byte-for-byte (same finding that made HA disable its equivalent
+    button by default) — a 404 here likely means "not supported for this
+    camera/account", not a client bug.
+    """
+    br = _bridge()
+    _cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    try:
+        ok = br.soft_reset_camera(session, cam_info["id"])
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
+    return {"camera": name, "rebooting": ok}
+
+
+@_blocking_tool
+def bosch_camera_hard_reset(camera: str, confirm: bool = False) -> dict[str, Any]:
+    """Factory-reset one camera (hard reset). DESTRUCTIVE.
+
+    Unpairs the camera from the Bosch account — it must be re-commissioned
+    from scratch via the Bosch app before it works again. Requires
+    ``confirm=True`` or raises ``invalid_argument`` without calling the API.
+
+    API: PUT /v11/video_inputs/{id}/hard_reset (empty body).
+    """
+    br = _bridge()
+    _cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    if not confirm:
+        raise MCPError(
+            code="invalid_argument",
+            detail=(
+                "hard_reset is destructive (factory-resets and unpairs the camera). "
+                "Pass confirm=True to proceed."
+            ),
+            camera=name,
+        )
+    try:
+        ok = br.hard_reset_camera(session, cam_info["id"])
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
+    return {"camera": name, "factory_reset": ok}
+
+
+@_blocking_tool
+def bosch_camera_rename(camera: str, new_name: str) -> dict[str, Any]:
+    """Rename a camera via the Bosch cloud API. The new name appears in the Bosch app.
+
+    API: PUT /v11/video_inputs  Body: {"videoInputId", "title", "timeZone"}.
+    """
+    br = _bridge()
+    cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    new_name = new_name.strip()
+    if not new_name:
+        raise MCPError(
+            code="invalid_argument",
+            detail="new_name must not be empty.",
+            camera=name,
+        )
+    time_zone = str(cfg.get("settings", {}).get("time_zone") or "UTC")
+    try:
+        br.rename_camera(session, cam_info["id"], new_name, time_zone)
+    except Exception as e:
+        wrapped = _wrap_privacy_blocked(e, name)
+        if wrapped:
+            raise wrapped from e
+        raise
+    return {"camera": name, "new_name": new_name}
+
+
 # ── Register resources + prompts ──────────────────────────────────────────────
 # Importing these modules causes their @mcp.resource / @mcp.prompt decorators
 # to execute, self-registering against the shared `mcp` FastMCP instance above.
@@ -2753,15 +3207,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=["stdio", "http", "sse"],
         default="stdio",
         help="Transport protocol: stdio (default, Claude Code/Desktop), "
-             "http (streamable-HTTP, remote/multi-client), "
-             "sse (legacy SSE)",
+        "http (streamable-HTTP, remote/multi-client), "
+        "sse (legacy SSE)",
     )
     parser.add_argument(
         "--http-host",
         default="127.0.0.1",
         dest="http_host",
         help="Bind host for HTTP/SSE transports (default: 127.0.0.1). "
-             "WARNING: set to 0.0.0.0 only in trusted network environments.",
+        "WARNING: set to 0.0.0.0 only in trusted network environments.",
     )
     parser.add_argument(
         "--http-port",

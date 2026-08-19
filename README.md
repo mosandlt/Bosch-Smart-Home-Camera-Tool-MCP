@@ -5,7 +5,7 @@
 > Reuses the proven reverse-engineered API client from the sister
 > [Python CLI tool](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python).
 >
-> **Status:** v1.7.2 — family-parity closeout (v1.7.0): motion zones, privacy masks, automation rules, camera sharing/friends, firmware install, siren duration, lighting schedule, listen-audio intercom. 55 tools + 3 resources + 2 prompts, stdio/SSE/streamable-HTTP, pipx/uvx-installable
+> **Status:** v1.7.2 — family-parity closeout (v1.7.0): motion zones, privacy masks, automation rules, camera sharing/friends, firmware install, siren duration, lighting schedule, listen-audio intercom. Plus the 2026-08-19 image/video tuning + camera-lifecycle round: timestamp overlay, status LED, lens elevation, darkness threshold, white balance, top/bottom LED brightness, soft/hard reset, rename. 70 tools + 3 resources + 2 prompts, stdio/SSE/streamable-HTTP, pipx/uvx-installable
 
 [![License][license-shield]](LICENSE)
 [![Project Maintenance][maintenance-shield]][user_profile]
@@ -21,7 +21,7 @@
 - [Disclaimer](#disclaimer)
 - [Why a separate MCP server?](#why-a-separate-mcp-server)
 - [Architecture](#architecture)
-- [MCP tools](#mcp-tools-55-total-v171)
+- [MCP tools](#mcp-tools-70-total-v172)
 - [MCP resources](#mcp-resources)
 - [MCP prompts](#mcp-prompts)
 - [Privacy stance](#privacy-stance--media-operations-are-lan-only)
@@ -124,7 +124,7 @@ sequenceDiagram
     Tool-->>Agent: {reachable: true, ip: "...", latency_ms: 12}
 ```
 
-## MCP tools (55 total, v1.7.2)
+## MCP tools (70 total, v1.7.2)
 
 | Tool | Description | Returns |
 |---|---|---|
@@ -183,11 +183,33 @@ sequenceDiagram
 | `bosch_camera_lighting_schedule_get` | Get the LED lighting schedule (outdoor Eyes cameras) | `{on_time, off_time, light_on_motion, darkness_threshold, schedule_status}` |
 | `bosch_camera_lighting_schedule_set` | Update the LED lighting schedule (outdoor Eyes cameras) | `{on_time, off_time, light_on_motion, darkness_threshold, schedule_status}` |
 | `bosch_camera_intercom_open` | Open a listen-audio session (camera mic → caller); returns an RTSPS URL, listen-only | `{camera, rtsps_url, duration, speaker_level_set}` |
+| `bosch_camera_timestamp_overlay_get` | Get whether a date/time overlay is burned into the video | `{enabled}` |
+| `bosch_camera_timestamp_overlay_set` | Turn the date/time video overlay on/off | `{enabled}` |
+| `bosch_camera_status_led_get` | Get the camera's status LED on/off state (Gen2 only) | `{enabled}` |
+| `bosch_camera_status_led_set` | Turn the camera's status LED on/off (Gen2 only) | `{enabled}` |
+| `bosch_camera_lens_elevation_get` | Get the lens mounting height in meters (Gen2 only) | `{meters}` |
+| `bosch_camera_lens_elevation_set` | Set the lens mounting height, 0.5-5.0 m (Gen2 only) | `{meters}` |
+| `bosch_camera_darkness_threshold_get` | Get the day/night lighting threshold + fading mode (Gen2 only) | `{threshold_percent, soft_light_fading}` |
+| `bosch_camera_darkness_threshold_set` | Set the day/night lighting threshold and/or fading mode (Gen2 only) | `{threshold_percent, soft_light_fading}` |
+| `bosch_camera_white_balance_get` | Get the front light's white balance, -1.0 cool .. 1.0 warm (Gen2 only) | `{value}` |
+| `bosch_camera_white_balance_set` | Set the front light's white balance (Gen2 only) | `{value}` |
+| `bosch_camera_led_brightness_get` | Get top or bottom LED brightness 0-100 % (Gen2 only) | `{position, brightness_percent}` |
+| `bosch_camera_led_brightness_set` | Set top or bottom LED brightness 0-100 % (Gen2 only) | `{position, brightness_percent}` |
+| `bosch_camera_soft_reset` | Reboot one camera (soft reset) | `{camera, rebooting}` |
+| `bosch_camera_hard_reset` | Factory-reset one camera — DESTRUCTIVE, unpairs the camera; requires `confirm=True` | `{camera, factory_reset}` |
+| `bosch_camera_rename` | Rename a camera via the cloud API | `{camera, new_name}` |
 
 Tools intentionally NOT exposed to LLMs (write-risky / time-consuming):
 - Token refresh (handled silently by the underlying client)
 - Cloud clip download (large payloads)
 - Two-way talk (caller mic → camera speaker): not exposed by the Bosch cloud API at all (same limitation the sister CLI has) — `bosch_camera_intercom_open` is listen-only
+
+Ported from the HA integration but deliberately NOT added (architecture mismatch — see `docs/family-parity-plan.md` 2026-08-19 audit for the full reasoning):
+- `open_live_connection` (explicit session open/keep-alive) — MCP tools are one-shot request/response calls with no persistent background process to hold a session open between calls; `bosch_camera_stream_url` already mints a fresh, immediately-usable URL per call, which is the MCP-shaped equivalent.
+- Frigate/external-RTSP "front door" (persistent credential-free RTSP server) — same reason: requires a long-running server process, which this stateless tool surface doesn't have.
+- `delete_event` / `send_event_webhook` — both operate on HA's own local-disk event-file cache and `webhook_url`/`enable_webhook_delivery` config, infrastructure this tool doesn't have (events here are pulled on-demand from the Bosch cloud, never stored locally).
+- AI alert history read-back — HA's `ai_alert_store.py` reads from `hass.config.path`-relative files in HA's own storage layout; coupling to that would be fragile and isn't clearly useful when the MCP client is itself typically the LLM doing the analysis.
+- `video_quality` / `stream_mode` selects and `image_rotation_180` — all three are client-side-only preferences in HA (no Bosch cloud API call at all: quality picks the RTSPS `inst=` parameter, stream_mode picks LOCAL vs REMOTE, rotation is a display-only CSS/PIL transform) with no persistent per-session state to attach them to here. `pan_preset` is already covered — `bosch_camera_pan(preset=...)` has shipped since v1.x.
 
 ### Reliability — transparent credential rotation
 
@@ -333,7 +355,7 @@ Bosch-Smart-Home-Camera-Tool-MCP/
 ├── src/
 │   └── bosch_camera_mcp/
 │       ├── __init__.py
-│       ├── server.py                 FastMCP server + all 55 MCP tools
+│       ├── server.py                 FastMCP server + all 70 MCP tools
 │       ├── adapters/
 │       │   ├── cli_bridge.py         sys.path bridge to the sister Python CLI for cloud ops
 │       │   └── __init__.py

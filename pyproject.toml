@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bosch-smart-home-camera-mcp"
-version = "1.7.2"
+version = "1.7.3"
 description = "Model Context Protocol server for Bosch Smart Home cameras"
 readme = "README.md"
 license = { text = "MIT" }
@@ -23,7 +23,7 @@ classifiers = [
     "Topic :: Home Automation",
 ]
 dependencies = [
-    "mcp>=1.2.0",
+    "mcp>=1.2.0,<2",
     "pydantic>=2.6",
     "requests>=2.31",
     "urllib3>=2.0",
