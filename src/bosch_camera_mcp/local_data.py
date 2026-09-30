@@ -127,7 +127,20 @@ def safe_lan_ip(value: object) -> Optional[str]:
     return str(ip)
 
 
-def build_url(ip: str, password: Optional[str]) -> str:
-    """Local RTSPS URL; the password is URL-quoted, or masked when None."""
+QUALITY_INST: dict[str, int] = {"high": 1, "low": 2}
+
+
+def build_url(ip: str, password: Optional[str], quality: str = "high", audio: bool = True) -> str:
+    """Local RTSPS URL; the password is URL-quoted, or masked when None.
+
+    Path ``/rtsp_tunnel?line=1&inst=<1|2>&enableaudio=<0|1>``: inst=1 high quality,
+    inst=2 low quality, enableaudio=1 adds AAC audio. Unknown quality raises ValueError.
+    """
+    inst = QUALITY_INST[quality] if quality in QUALITY_INST else None
+    if inst is None:
+        raise ValueError(f"quality must be one of {sorted(QUALITY_INST)}")
     secret = quote(password, safe="") if password is not None else "***"
-    return f"rtsps://{LOCAL_USERNAME}:{secret}@{ip}:{LOCAL_PORT}/live"
+    return (
+        f"rtsps://{LOCAL_USERNAME}:{secret}@{ip}:{LOCAL_PORT}"
+        f"/rtsp_tunnel?line=1&inst={inst}&enableaudio={1 if audio else 0}"
+    )

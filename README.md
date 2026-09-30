@@ -5,7 +5,7 @@
 > Reuses the proven reverse-engineered API client from the sister
 > [Python CLI tool](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python).
 >
-> **Status:** v1.8.0 — local data interface status + local stream URL; family-parity closeout (v1.7.0): motion zones, privacy masks, automation rules, camera sharing/friends, firmware install, siren duration, lighting schedule, listen-audio intercom. Plus the 2026-08-19 image/video tuning + camera-lifecycle round: timestamp overlay, status LED, lens elevation, darkness threshold, white balance, top/bottom LED brightness, soft/hard reset, rename. 71 tools + 3 resources + 2 prompts, stdio/SSE/streamable-HTTP, pipx/uvx-installable
+> **Status:** v1.8.1 — local data interface status + local stream URL (quality + audio); family-parity closeout (v1.7.0): motion zones, privacy masks, automation rules, camera sharing/friends, firmware install, siren duration, lighting schedule, listen-audio intercom. Plus the 2026-08-19 image/video tuning + camera-lifecycle round: timestamp overlay, status LED, lens elevation, darkness threshold, white balance, top/bottom LED brightness, soft/hard reset, rename. 71 tools + 3 resources + 2 prompts, stdio/SSE/streamable-HTTP, pipx/uvx-installable
 
 [![License][license-shield]](LICENSE)
 [![Project Maintenance][maintenance-shield]][user_profile]
@@ -132,7 +132,7 @@ sequenceDiagram
 | `bosch_camera_status` | Get online/offline + privacy state for one camera | `{name, status, privacy_mode, light_on, last_event_at}` |
 | `bosch_camera_snapshot` | LAN-only JPEG capture (no cloud) — HTTP Digest to camera IP | `{path, method, timestamp}` |
 | `bosch_camera_stream_url` | LAN-only RTSPS stream URL (no cloud relay) — consumable by ffmpeg/VLC/go2rtc | `{camera, rtsps_url, note, source}` |
-| `bosch_camera_local_data_status` | Read-only state of the local data interface (Gen2, firmware >= 9.40.105): `active`/`inactive`/`unsupported`/`unknown`. With `local_data_password` (or `BOSCH_CAMERA_LDI_PASSWORD_<NAME>`) set and the interface active, `bosch_camera_stream_url` returns the local video-only URL with the password masked | `{camera, state, queried, password_configured}` |
+| `bosch_camera_local_data_status` | Read-only state of the local data interface (Gen2, firmware >= 9.40.105): `active`/`inactive`/`unsupported`/`unknown`. With `local_data_password` (or `BOSCH_CAMERA_LDI_PASSWORD_<NAME>`) set and the interface active, `bosch_camera_stream_url` returns the documented local URL (`/rtsp_tunnel?line=1&inst=<1|2>&enableaudio=<0|1>`, high/low quality, optional AAC audio) with the password masked; optional `quality` (`high`/`low`) and `audio` arguments | `{camera, state, queried, password_configured}` |
 | `bosch_camera_events` | List recent motion/person/audio events | array of `{event_id, type, tags, timestamp_iso, has_clip, clip_status}` |
 | `bosch_camera_privacy_set` | Turn privacy mode on/off; `prefer_local=True` routes to LAN RCP first | `{name, status, privacy_mode, ...}` |
 | `bosch_camera_light_set` | Turn spotlight on/off; `prefer_local=True` routes to LAN RCP first | `{name, status, light_on, ...}` |

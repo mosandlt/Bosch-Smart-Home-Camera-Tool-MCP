@@ -167,9 +167,32 @@ class TestStreamUrl:
 
         r = bosch_camera_stream_url(camera="Indoor")
         assert r.source == "local_data_interface"
-        assert r.rtsps_url == "rtsps://localuser:***@10.0.0.50:9554/live"
+        assert (
+            r.rtsps_url
+            == "rtsps://localuser:***@10.0.0.50:9554/rtsp_tunnel?line=1&inst=1&enableaudio=1"
+        )
         assert PW not in r.model_dump_json()
         assert "temp-secret" not in r.model_dump_json()
+
+    @resp_lib.activate
+    @pytest.mark.parametrize(("quality", "inst"), [("high", 1), ("low", 2)])
+    @pytest.mark.parametrize(("audio", "flag"), [(True, 1), (False, 0)])
+    def test_tool_quality_audio(self, quality: str, inst: int, audio: bool, flag: int) -> None:
+        resp_lib.add(resp_lib.GET, _status_url(), json={"username": "localuser"}, status=200)
+        from bosch_camera_mcp.server import bosch_camera_stream_url
+
+        r = bosch_camera_stream_url(camera="Indoor", quality=quality, audio=audio)
+        assert r.rtsps_url.endswith(f"/rtsp_tunnel?line=1&inst={inst}&enableaudio={flag}")
+        assert PW not in r.model_dump_json()
+        assert ("video only" in r.note) is (not audio)
+
+    @resp_lib.activate
+    def test_tool_garbage_quality_rejected(self) -> None:
+        from bosch_camera_mcp.server import bosch_camera_stream_url
+
+        with pytest.raises(MCPError) as ei:
+            bosch_camera_stream_url(camera="Indoor", quality="ultra")
+        assert ei.value.code == "invalid_argument"
 
     @resp_lib.activate
     def test_active_with_password_bad_ip_fails_closed(self, setup: dict[str, Any]) -> None:
@@ -237,9 +260,22 @@ class TestPassword:
 
     def test_url_quoting(self) -> None:
         assert ld.build_url("10.0.0.5", "p@ss/w:rd") == (
-            "rtsps://localuser:p%40ss%2Fw%3Ard@10.0.0.5:9554/live"
+            "rtsps://localuser:p%40ss%2Fw%3Ard@10.0.0.5:9554/rtsp_tunnel?line=1&inst=1&enableaudio=1"
         )
-        assert ld.build_url("10.0.0.5", None) == "rtsps://localuser:***@10.0.0.5:9554/live"
+        assert ld.build_url("10.0.0.5", None) == (
+            "rtsps://localuser:***@10.0.0.5:9554/rtsp_tunnel?line=1&inst=1&enableaudio=1"
+        )
+
+    @pytest.mark.parametrize(("quality", "inst"), [("high", 1), ("low", 2)])
+    @pytest.mark.parametrize(("audio", "flag"), [(True, 1), (False, 0)])
+    def test_quality_audio_modes(self, quality: str, inst: int, audio: bool, flag: int) -> None:
+        assert ld.build_url("10.0.0.5", None, quality, audio).endswith(
+            f":9554/rtsp_tunnel?line=1&inst={inst}&enableaudio={flag}"
+        )
+
+    def test_garbage_quality_rejected(self) -> None:
+        with pytest.raises(ValueError):
+            ld.build_url("10.0.0.5", None, "ultra")
 
     @pytest.mark.parametrize(
         ("ip", "ok"),

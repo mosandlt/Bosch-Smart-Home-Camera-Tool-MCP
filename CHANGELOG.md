@@ -2,12 +2,18 @@
 
 ## [Unreleased]
 
+## [v1.8.1] - 2026-09-30
+
+### Fixed
+
+- `bosch_camera_stream_url` local source now returns `rtsps://localuser:***@<lan-ip>:9554/rtsp_tunnel?line=1&inst=<1|2>&enableaudio=<0|1>` (was `/live`, video only in a single quality): high/low quality via new `quality` argument, AAC audio via new `audio` argument (default on). Password stays masked.
+
 ## [v1.8.0] - 2026-09-30
 
 ### Added
 
 - `bosch_camera_local_data_status`: read-only state of a camera's local data interface (Gen2, firmware >= 9.40.105; other cameras are not queried). 71 tools total.
-- `bosch_camera_stream_url` returns the local video-only source (`rtsps://localuser:***@<lan-ip>:9554/live`, password masked) when the interface is active and a per-camera `local_data_password` (config) or `BOSCH_CAMERA_LDI_PASSWORD_<NAME>` (env) is set. No fallback to other credentials in that case. Without a password, or when inactive, the tool behaves as before (plus a hint when active but no password is set).
+- `bosch_camera_stream_url` returns the local source (`rtsps://localuser:***@<lan-ip>:9554/rtsp_tunnel?line=1&inst=1&enableaudio=1`, password masked) when the interface is active and a per-camera `local_data_password` (config) or `BOSCH_CAMERA_LDI_PASSWORD_<NAME>` (env) is set. No fallback to other credentials in that case. Without a password, or when inactive, the tool behaves as before (plus a hint when active but no password is set).
 
 ## [v1.7.3] - 2026-08-19
 

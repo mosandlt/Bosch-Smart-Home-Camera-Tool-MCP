@@ -650,14 +650,28 @@ def bosch_camera_snapshot(camera: str) -> SnapshotResult:
 
 
 @_blocking_tool
-def bosch_camera_stream_url(camera: str) -> StreamUrlResult:
+def bosch_camera_stream_url(
+    camera: str, quality: str = "high", audio: bool = True
+) -> StreamUrlResult:
     """Get the LAN RTSPS stream URL for one camera. No Bosch cloud relay.
 
     The returned URL is consumable by ffmpeg/VLC/go2rtc. Requires that the MCP
     host runs on the same network as the camera and has local credentials
     configured for the camera (bosch_config.json → cameras[name].local_*).
+
+    With the local data interface active and a local_data_password set, the URL is
+    ``rtsps://localuser:***@<ip>:9554/rtsp_tunnel?line=1&inst=<1|2>&enableaudio=<0|1>``
+    (password masked). ``quality``: "high" (inst=1) or "low" (inst=2);
+    ``audio``: include AAC audio (16 kHz mono).
     """
     from urllib.parse import quote as _q
+
+    if quality not in local_data.QUALITY_INST:
+        raise MCPError(
+            code="invalid_argument",
+            detail="quality must be 'high' or 'low'.",
+            camera=camera,
+        )
 
     br = _bridge()
     _cfg, _session, cameras = _get_session()
@@ -684,11 +698,13 @@ def bosch_camera_stream_url(camera: str) -> StreamUrlResult:
                 )
             return StreamUrlResult(
                 camera=name,
-                rtsps_url=local_data.build_url(ldi_ip, None),
+                rtsps_url=local_data.build_url(ldi_ip, None, quality, audio),
                 note=(
-                    "Video only (no audio), H.264, LAN-only. Password masked: replace *** "
-                    "with the URL-quoted sticker password. The camera closes the stream "
-                    "while privacy mode is on."
+                    "H.264, LAN-only, "
+                    + ("with AAC audio" if audio else "video only (audio disabled)")
+                    + f", {quality} quality. Password masked: replace *** "
+                    "with the URL-quoted sticker password. The camera allows only a few "
+                    "concurrent RTSP sessions and closes the stream while privacy mode is on."
                 ),
                 source="local_data_interface",
             )
