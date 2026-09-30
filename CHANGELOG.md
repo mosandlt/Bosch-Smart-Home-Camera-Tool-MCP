@@ -1,5 +1,14 @@
 # Changelog — Bosch Smart Home Camera MCP Server
 
+## [Unreleased]
+
+## [v1.8.0] - 2026-09-30
+
+### Added
+
+- `bosch_camera_local_data_status`: read-only state of a camera's local data interface (Gen2, firmware >= 9.40.105; other cameras are not queried). 71 tools total.
+- `bosch_camera_stream_url` returns the local video-only source (`rtsps://localuser:***@<lan-ip>:9554/live`, password masked) when the interface is active and a per-camera `local_data_password` (config) or `BOSCH_CAMERA_LDI_PASSWORD_<NAME>` (env) is set. No fallback to other credentials in that case. Without a password, or when inactive, the tool behaves as before (plus a hint when active but no password is set).
+
 ## [v1.7.3] - 2026-08-19
 
 ### Added

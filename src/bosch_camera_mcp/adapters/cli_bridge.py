@@ -186,6 +186,7 @@ def get_session_and_cameras(
                 "local_ip": prev.get("local_ip", ""),
                 "local_username": prev.get("local_username", ""),
                 "local_password": prev.get("local_password", ""),
+                "local_data_password": prev.get("local_data_password", ""),
             }
         cfg["cameras"] = cameras
     except MCPError:

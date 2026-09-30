@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING, Any, Optional, ParamSpec, TypeVar
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, Field, ValidationError
 
-from . import __version__
+from . import __version__, local_data
 from .errors import MCPError
 from .time_utils import clean_bosch_timestamp
 
@@ -89,6 +89,19 @@ class StreamUrlResult(BaseModel):
         description="LAN RTSPS URL via TLS proxy (rtsps://<user>:<pass>@<ip>:443/...)"
     )
     note: str = "LAN-only — MCP host must be on the same network as the camera."
+    source: str = Field(
+        default="temporary_credentials",
+        description="'local_data_interface' when the URL uses the camera's local data interface",
+    )
+
+
+class LocalDataStatus(BaseModel):
+    """Local data interface status returned by bosch_camera_local_data_status."""
+
+    camera: str = Field(description="Canonical camera name")
+    state: str = Field(description="active | inactive | unsupported | unknown")
+    queried: bool = Field(description="False when the camera is not eligible (Gen1 / old firmware)")
+    password_configured: bool = Field(description="Whether a sticker password is configured")
 
 
 class LanPingResult(BaseModel):
@@ -652,6 +665,38 @@ def bosch_camera_stream_url(camera: str) -> StreamUrlResult:
 
     name, cam_info = br._resolve_cam(cameras, camera)
 
+    state = local_data.fetch_state(
+        _session, br.CLOUD_API, cam_info["id"], cam_info.get("model"), cam_info.get("firmware")
+    )
+    ldi_note: Optional[str] = None
+    if state == local_data.STATE_ACTIVE:
+        if local_data.get_password(name, cam_info) is not None:
+            # Fail closed: no fallback to temporary credentials for this camera.
+            ldi_ip = local_data.safe_lan_ip(cam_info.get("local_ip"))
+            if ldi_ip is None:
+                raise MCPError(
+                    code="local_unavailable",
+                    detail=(
+                        f"Local data interface is active for {name!r} but local_ip is missing "
+                        "or not a private LAN address."
+                    ),
+                    camera=name,
+                )
+            return StreamUrlResult(
+                camera=name,
+                rtsps_url=local_data.build_url(ldi_ip, None),
+                note=(
+                    "Video only (no audio), H.264, LAN-only. Password masked: replace *** "
+                    "with the URL-quoted sticker password. The camera closes the stream "
+                    "while privacy mode is on."
+                ),
+                source="local_data_interface",
+            )
+        ldi_note = (
+            "Local data interface is active: set local_data_password for this camera "
+            "(or BOSCH_CAMERA_LDI_PASSWORD_<NAME>) to use it."
+        )
+
     local_ip = cam_info.get("local_ip", "").strip()
     local_user = cam_info.get("local_username", "").strip()
     local_pass = cam_info.get("local_password", "").strip()
@@ -672,7 +717,31 @@ def bosch_camera_stream_url(camera: str) -> StreamUrlResult:
         "/rtsp_tunnel?inst=2&enableaudio=1&fmtp=1&maxSessionDuration=3600"
     )
 
+    if ldi_note:
+        return StreamUrlResult(camera=name, rtsps_url=rtsps_url, note=ldi_note)
     return StreamUrlResult(camera=name, rtsps_url=rtsps_url)
+
+
+@_blocking_tool
+def bosch_camera_local_data_status(camera: str) -> LocalDataStatus:
+    """Read-only state of the camera's local data interface (never returns a password).
+
+    Only Gen2 cameras on firmware >= 9.40.105 are queried; others report
+    ``unsupported`` with ``queried=False``.
+    """
+    br = _bridge()
+    _cfg, session, cameras = _get_session()
+    br.ensure_cli_importable()
+
+    name, cam_info = br._resolve_cam(cameras, camera)
+    model, fw = cam_info.get("model"), cam_info.get("firmware")
+    state = local_data.fetch_state(session, br.CLOUD_API, cam_info["id"], model, fw)
+    return LocalDataStatus(
+        camera=name,
+        state=state,
+        queried=local_data.is_queryable(model, fw),
+        password_configured=local_data.get_password(name, cam_info) is not None,
+    )
 
 
 @_blocking_tool
